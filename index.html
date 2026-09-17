@@ -116,6 +116,19 @@
             <option value="10">10 月</option><option value="11">11 月</option><option value="12">12 月</option>
           </select>
         </div>
+
+        <!-- 班表日期區間切換 (支援全月、原檔16~18、自訂起訖日) -->
+        <div class="date-range-buttons" style="display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap">
+          <button type="button" id="btn-view-range-month" class="btn btn-sm btn-primary" title="顯示當月完整全月份">當月全月份</button>
+          <button type="button" id="btn-view-range-sample" class="btn btn-sm btn-secondary" title="顯示原檔 16~18 日區間">原檔區間 (16~18日)</button>
+          <button type="button" id="btn-view-range-custom" class="btn btn-sm btn-secondary" title="自訂顯示起訖日">自訂區間</button>
+          <div id="wrap-view-range-custom" style="display:none; align-items:center; gap:0.3rem">
+            <span style="font-size:0.8rem">從</span>
+            <select id="view-start-date" class="form-select" style="width:68px; padding:2px 4px; font-size:0.8rem"></select>
+            <span style="font-size:0.8rem">至</span>
+            <select id="view-end-date" class="form-select" style="width:68px; padding:2px 4px; font-size:0.8rem"></select>
+          </div>
+        </div>
       </div>
 
       <!-- 統計摘要 -->
@@ -439,6 +452,10 @@
           <!-- Tab 4: Employees (下拉式職稱) -->
           <div id="tab-pane-employees" style="display:none">
             <form id="form-add-employee" style="display:flex; gap:0.5rem; margin-bottom:0.75rem; align-items:flex-end; flex-wrap:wrap">
+              <div style="width:75px">
+                <label class="form-label">編號(序號)</label>
+                <input type="number" id="input-emp-id" class="form-input" min="1" max="999" placeholder="自動" />
+              </div>
               <div style="width:130px">
                 <label class="form-label">職稱 (下拉選單)</label>
                 <select id="input-emp-title-select" class="form-select" required></select>

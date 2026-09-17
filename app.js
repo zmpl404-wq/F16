@@ -117,7 +117,7 @@ const INITIAL_EMPLOYEES = [
   { id: 56, title: '中控', name: '陳佩雯', gender: 'F', grade: 'B', initialShifts: { '16': '中控', '17': '休', '18': '休' } }
 ];
 
-// 全域狀態管理
+// 全域狀態管理 (支援裝置本機儲存 localStorage)
 const STORAGE_KEY = 'f16_schedule_v1';
 
 function saveState() {
@@ -125,6 +125,9 @@ function saveState() {
     const toSave = {
       year: state.year,
       month: state.month,
+      dateRangeMode: state.dateRangeMode,
+      customStartDay: state.customStartDay,
+      customEndDay: state.customEndDay,
       jobTitles: state.jobTitles,
       employees: state.employees,
       shifts: state.shifts,
@@ -148,6 +151,9 @@ function loadState() {
     const saved = JSON.parse(raw);
     if (saved.year) state.year = saved.year;
     if (saved.month) state.month = saved.month;
+    if (saved.dateRangeMode) state.dateRangeMode = saved.dateRangeMode;
+    if (saved.customStartDay) state.customStartDay = saved.customStartDay;
+    if (saved.customEndDay) state.customEndDay = saved.customEndDay;
     if (saved.jobTitles && saved.jobTitles.length) state.jobTitles = saved.jobTitles;
     if (saved.employees && saved.employees.length) state.employees = saved.employees;
     if (saved.shifts && saved.shifts.length) state.shifts = saved.shifts;
@@ -162,11 +168,29 @@ function loadState() {
   }
 }
 
+// 清空所有排班 (使用者需求：新增一個按鈕，可以清空所有排班)
+function clearAllSchedule() {
+  if (!confirm('確定要清空所有排班嗎？所有員工在目前與所有日期的排班資料都將被清空。')) return;
+  state.employees.forEach(emp => {
+    state.schedule[emp.id] = {};
+    for (let d = 1; d <= 31; d++) {
+      state.schedule[emp.id][String(d)] = '';
+    }
+  });
+  state.lockedCells = {};
+  renderApp();
+  alert('已清空所有排班資料！');
+}
+
+// 回到目前預設值 (使用者需求：新增一個按鈕回到目前預設值)
 function resetToDefaults() {
-  if (!confirm('確定回到預設值嗎？這將清除所有目前的排班資料與設定，恢復至系統初始狀態。')) return;
+  if (!confirm('確定要回到目前預設值嗎？這將重設所有自訂員工、班別、等級、規則與排班設定，恢復至系統初始預設值。')) return;
   localStorage.removeItem(STORAGE_KEY);
   state.year = 2026;
   state.month = 9;
+  state.dateRangeMode = 'MONTH';
+  state.customStartDay = 1;
+  state.customEndDay = 18;
   state.jobTitles = [...DEFAULT_TITLES];
   state.employees = JSON.parse(JSON.stringify(INITIAL_EMPLOYEES));
   state.shifts = [...LEAVE_SHIFTS, ...WORK_SHIFTS];
@@ -181,7 +205,7 @@ function resetToDefaults() {
   state.schedule = {};
   state.lockedCells = {};
   state.highlightCell = null;
-  // sync year/month selects
+  // sync selects
   const ySel = document.getElementById('select-year');
   const mSel = document.getElementById('select-month');
   if (ySel) ySel.value = '2026';
@@ -189,11 +213,15 @@ function resetToDefaults() {
   initSchedule();
   renderApp();
   saveState();
+  alert('已成功恢復至系統預設值！');
 }
 
 let state = {
   year: 2026,
   month: 9,
+  dateRangeMode: 'MONTH', // 'MONTH' | 'SAMPLE' | 'CUSTOM'
+  customStartDay: 1,
+  customEndDay: 18,
   jobTitles: [...DEFAULT_TITLES],
   employees: JSON.parse(JSON.stringify(INITIAL_EMPLOYEES)),
   shifts: [...LEAVE_SHIFTS, ...WORK_SHIFTS],
@@ -242,8 +270,18 @@ function getCleanWeekday(year, month, day) {
   return WEEKDAYS_CLEAN[d.getDay()];
 }
 
+// 支援自訂日期區間、原檔區間(16~18)與當月全月份
 function getDatesArray() {
   const total = getDaysInMonth(state.year, state.month);
+  if (state.dateRangeMode === 'SAMPLE') {
+    return ['16', '17', '18'].filter(d => parseInt(d, 10) <= total);
+  } else if (state.dateRangeMode === 'CUSTOM') {
+    const s = Math.max(1, Math.min(state.customStartDay || 1, total));
+    const e = Math.max(s, Math.min(state.customEndDay || total, total));
+    const arr = [];
+    for (let i = s; i <= e; i++) arr.push(String(i));
+    return arr;
+  }
   return Array.from({ length: total }, (_, i) => String(i + 1));
 }
 
@@ -391,8 +429,10 @@ function validateSchedule() {
   return violations;
 }
 
-// 3. 自動排班演算法 (Auto-Scheduler)
+// 3. 自動排班演算法 (Auto-Scheduler) - 依設定規則嚴格排班，除非沒辦法才適度放寬軟性限制
 function runAutoSchedule() {
+  if (!confirm('確定要依照目前設定的各項規則執行一鍵自動化排班嗎？')) return;
+
   const shiftMap = new Map(state.shifts.map(s => [s.id, s]));
   const gradeRankMap = new Map(state.grades.map(g => [g.id, g.rank]));
   const maxConsecutive = state.rulesConfig.maxConsecutiveDays || 5;
@@ -470,6 +510,7 @@ function runAutoSchedule() {
       const needed = (shift.defaultDemand || 1) - currentCount;
       if (needed <= 0) return;
 
+      // 第一階段：嚴格滿足所有設定規則 (等級、性別、專屬班別、互斥、連續上班天數)
       let candidates = activeEmps.filter(emp => {
         if (todayAssigned.has(emp.id)) return false;
 
@@ -492,7 +533,7 @@ function runAutoSchedule() {
         return true;
       });
 
-      // 排序候選人
+      // 排序候選人：適配度最高、工作次數最少者優先
       candidates.sort((a, b) => {
         const diffA = (gradeRankMap.get(a.grade) || 1) - reqRank;
         const diffB = (gradeRankMap.get(b.grade) || 1) - reqRank;
@@ -508,6 +549,32 @@ function runAutoSchedule() {
         dayAssignments.get(shift.id).push(cand.id);
         empWorkCount.set(cand.id, (empWorkCount.get(cand.id) || 0) + 1);
         filled++;
+      }
+
+      // 第二階段：「除非沒辦法」時放寬連上天數，但硬性規定(等級、性別、專屬、互斥)仍嚴格守護
+      if (filled < needed) {
+        let fallbackCandidates = activeEmps.filter(emp => {
+          if (todayAssigned.has(emp.id)) return false;
+          const allowedSet = specificMap.get(emp.id);
+          if (allowedSet && !allowedSet.has(shift.id)) return false;
+          if ((gradeRankMap.get(emp.grade) || 1) < reqRank) return false;
+          if (shift.genderReq === 'M' && emp.gender !== 'M') return false;
+          if (shift.genderReq === 'F' && emp.gender !== 'F') return false;
+          const inShift = dayAssignments.get(shift.id) || [];
+          const confs = conflictMap.get(emp.id);
+          if (confs && inShift.some(id => confs.has(id))) return false;
+          return true;
+        });
+
+        fallbackCandidates.sort((a, b) => (empWorkCount.get(a.id) || 0) - (empWorkCount.get(b.id) || 0));
+        for (const cand of fallbackCandidates) {
+          if (filled >= needed) break;
+          newSched[cand.id][d] = shift.id;
+          todayAssigned.add(cand.id);
+          dayAssignments.get(shift.id).push(cand.id);
+          empWorkCount.set(cand.id, (empWorkCount.get(cand.id) || 0) + 1);
+          filled++;
+        }
       }
     });
 
@@ -569,6 +636,34 @@ function renderApp() {
     btnInsp.className = 'btn btn-success';
   }
 
+  // 同步主畫面日期區間按鈕外觀
+  const btnMonth = document.getElementById('btn-view-range-month');
+  const btnSample = document.getElementById('btn-view-range-sample');
+  const btnCustom = document.getElementById('btn-view-range-custom');
+  const wrapCustom = document.getElementById('wrap-view-range-custom');
+  if (btnMonth && btnSample && btnCustom) {
+    btnMonth.className = state.dateRangeMode === 'MONTH' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
+    btnSample.className = state.dateRangeMode === 'SAMPLE' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
+    btnCustom.className = state.dateRangeMode === 'CUSTOM' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
+    if (wrapCustom) wrapCustom.style.display = state.dateRangeMode === 'CUSTOM' ? 'inline-flex' : 'none';
+  }
+
+  // 同步手機版規則檢驗按鈕
+  const badgeM = document.getElementById('violation-badge-m');
+  const labelM = document.getElementById('inspector-label-m');
+  const btnInspM = document.getElementById('btn-inspector-m');
+  if (btnInspM) {
+    if (violations.length > 0) {
+      if (badgeM) { badgeM.style.display = 'inline-flex'; badgeM.innerText = violations.length; }
+      if (labelM) labelM.innerText = `規則違規(${violations.length})`;
+      btnInspM.className = 'btn btn-violation';
+    } else {
+      if (badgeM) badgeM.style.display = 'none';
+      if (labelM) labelM.innerText = '規則檢視';
+      btnInspM.className = 'btn btn-success';
+    }
+  }
+
   renderStandardTable(dates, shiftMap, violationSet);
   renderSplitTable(dates, shiftMap, new Set(), rocYear); // 保持隱藏的對稱表同步
   renderInspectorModal(violations);
@@ -597,7 +692,10 @@ function renderStandardTable(dates, shiftMap, violationSet) {
   });
   html += '</tr></thead><tbody>';
 
-  state.employees.forEach(emp => {
+  // 依照員工編號 (ID) 嚴格由小至大排序呈現班表
+  const sortedEmployees = [...state.employees].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+
+  sortedEmployees.forEach(emp => {
     let leaves = 0, works = 0;
     dates.forEach(d => {
       const sId = state.schedule[emp.id]?.[d];
@@ -657,9 +755,11 @@ function renderStandardTable(dates, shiftMap, violationSet) {
 
 function renderSplitTable(dates, shiftMap, violationSet, rocYear) {
   const table = document.getElementById('table-split');
-  const half = Math.ceil(state.employees.length / 2);
-  const leftEmps = state.employees.slice(0, half);
-  const rightEmps = state.employees.slice(half);
+  // 依照員工編號排序後，分為左右等份
+  const sorted = [...state.employees].sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  const half = Math.ceil(sorted.length / 2);
+  const leftEmps = sorted.slice(0, half);
+  const rightEmps = sorted.slice(half);
   const maxRows = Math.max(leftEmps.length, rightEmps.length);
 
   let html = '<thead>';
@@ -1193,20 +1293,22 @@ async function handleImportExcel(file) {
     alert('ExcelJS 載入中，請稍候重試。');
     return;
   }
+  if (!confirm(`確定要匯入「${file.name}」嗎？這將會依照色塊與文字更新系統內的排班資料。`)) {
+    return;
+  }
   try {
     const arrayBuffer = await file.arrayBuffer();
     const wb = new window.ExcelJS.Workbook();
     await wb.xlsx.load(arrayBuffer);
     const ws = wb.worksheets[0];
 
-    // 色塊代號映射表 - 支援多種 ARGB 格式變體
-    // 原始色值 (去除前綴 FF 後的 6 位 RGB hex)
+    // 色塊代號映射表 - 支援多種 6位 ARGB hex
     const colorToShiftMap = {
       'FFC7CE': '休',  // 紅色系休假
       'FFCCCC': '休',  // 淡紅
-      'FF0000': '休',  // 純紅 (備用)
+      'FF0000': '休',  // 純紅
       '262626': '停',  // 停休 (深灰近黑)
-      '000000': '停',  // 純黑 (備用)
+      '000000': '停',  // 純黑
       '1F1F1F': '停',  // 深灰
       'FCE4D6': '粉',  // 粉假
       'F4CCCC': '粉',  // 淡粉
@@ -1218,56 +1320,72 @@ async function handleImportExcel(file) {
       'D9E1F2': '藍'   // 淡藍紫
     };
 
-    // 顏色匹配函數：容許輕微顏色差異
-    function matchColor(argbStr) {
-      if (!argbStr) return null;
-      const hex = argbStr.replace(/^FF/i, '').toUpperCase().replace('#', '');
-      if (colorToShiftMap[hex]) return colorToShiftMap[hex];
-      // 模糊匹配 (色差容忍)
+    function matchColor(hex) {
+      if (!hex || hex.length < 6) return null;
       try {
         const r = parseInt(hex.slice(0, 2), 16);
         const g = parseInt(hex.slice(2, 4), 16);
         const b = parseInt(hex.slice(4, 6), 16);
-        // 紅色系 (高R、低G、低B)
         if (r > 200 && g < 170 && b < 210) return '休';
-        // 近黑色 (低RGB均值)
         if (r < 50 && g < 50 && b < 50) return '停';
-        // 綠色系 (高G)
         if (g > 190 && r < 220 && b < 220 && g > r && g > b) return '綠';
-        // 藍色系 (高B)
         if (b > 180 && r < 220 && g < 240 && b > g && b > r) return '藍';
-        // 粉橙系 (高R、中G)
         if (r > 220 && g > 200 && b < 200) return '粉';
       } catch(_) {}
       return null;
     }
 
-    const importedEmployees = [];
-    const importedSchedule = {};
-    const newTitles = new Set(state.jobTitles);
+    function getShiftFromCell(cell) {
+      if (!cell) return '';
+      // 1. 檢查色塊
+      if (cell.fill) {
+        const argb = cell.fill.fgColor?.argb || cell.fill.bgColor?.argb || '';
+        if (argb) {
+          const hex = String(argb).slice(-6).toUpperCase();
+          if (colorToShiftMap[hex]) return colorToShiftMap[hex];
+          const matched = matchColor(hex);
+          if (matched) return matched;
+        }
+      }
+      // 2. 文字值
+      const txt = String(cell.value ?? '').trim();
+      return txt;
+    }
 
-    // 掃描第2列找到日期欄 (先掃左半部 col D~F, 或更多)
-    let leftDates = [];
-    for (let c = 4; c <= Math.min(35, ws.columnCount); c++) {
-      const v = ws.getRow(2).getCell(c).value;
-      if (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) {
-        leftDates.push(String(Number(v)));
-      } else if (leftDates.length > 0) {
-        break; // 遇到空格就停止
+    // 掃描第2列（或第1列）獲取左半部與右半部日期欄位
+    let leftDateCols = [];
+    let rightDateCols = [];
+
+    for (let c = 4; c <= Math.min(10, ws.columnCount); c++) {
+      const v = ws.getRow(2).getCell(c).value ?? ws.getRow(1).getCell(c).value;
+      if (v !== null && v !== undefined && String(v).trim() !== '' && !isNaN(Number(v))) {
+        leftDateCols.push({ col: c, day: String(Number(v)) });
       }
     }
-    if (leftDates.length === 0) {
-      // 嘗試第1列
+
+    for (let c = 11; c <= Math.min(20, ws.columnCount); c++) {
+      const v = ws.getRow(2).getCell(c).value ?? ws.getRow(1).getCell(c).value;
+      if (v !== null && v !== undefined && String(v).trim() !== '' && !isNaN(Number(v))) {
+        rightDateCols.push({ col: c, day: String(Number(v)) });
+      }
+    }
+
+    // 若非對稱左右欄，則掃描全欄 (例如標準30天)
+    if (leftDateCols.length === 0) {
       for (let c = 4; c <= Math.min(35, ws.columnCount); c++) {
-        const v = ws.getRow(1).getCell(c).value;
-        if (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) {
-          leftDates.push(String(Number(v)));
+        const v = ws.getRow(2).getCell(c).value ?? ws.getRow(1).getCell(c).value;
+        if (v !== null && v !== undefined && String(v).trim() !== '' && !isNaN(Number(v))) {
+          leftDateCols.push({ col: c, day: String(Number(v)) });
         }
       }
     }
 
+    const importedEmployees = [];
+    const importedSchedule = {};
+    const newTitles = new Set(state.jobTitles);
+    const discoveredShifts = new Set();
 
-    // 讀取左半部員工
+    // 讀取左半部員工 (Row 3 到 rowCount)
     for (let r = 3; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
       const id = row.getCell(1).value;
@@ -1275,43 +1393,39 @@ async function handleImportExcel(file) {
       const nameCell = row.getCell(3);
       const name = nameCell.value;
 
-      if (!name || name === '出勤人數') continue;
+      if (!name || name === '出勤人數' || typeof name !== 'string') continue;
 
       const titleStr = String(title || '保全員').trim();
       newTitles.add(titleStr);
 
-      // 判斷性別 (字體紅字為女性)
-      const fontColor = nameCell.font?.color?.argb || '';
-      const isFemale = fontColor.includes('FF0000') || fontColor.includes('FF00') || ['燕', '宜', '萍', '容', '芬', '婷', '伶', '涵', '佳', '真', '晏', '樺', '璇', '嫺', '雯', '綾', '鈴', '羽', '瑩', '琳', '宣'].some(ch => String(name).includes(ch));
+      const fontColor = String(nameCell.font?.color?.argb || '');
+      const isFemale = fontColor.includes('FF0000') || fontColor.slice(-6).toUpperCase() === 'FF0000' ||
+        ['燕', '宜', '萍', '容', '芬', '婷', '伶', '涵', '佳', '真', '晏', '樺', '璇', '嫺', '雯', '綾', '鈴', '羽', '瑩', '琳', '宣'].some(ch => name.includes(ch));
 
+      const empId = (typeof id === 'number' && id > 0) ? id : (importedEmployees.length + 1);
       const empObj = {
-        id: typeof id === 'number' ? id : importedEmployees.length + 1,
+        id: empId,
         title: titleStr,
-        name: String(name).trim(),
+        name: name.trim(),
         gender: isFemale ? 'F' : 'M',
         grade: titleStr === '組長' ? 'S' : (titleStr === '哨長' ? 'A' : 'B'),
         initialShifts: {}
       };
 
       importedSchedule[empObj.id] = {};
-      leftDates.forEach((d, i) => {
-        const cell = row.getCell(4 + i);
-        let sVal = String(cell.value || '').trim();
-        // 若文字空白或為特定色，檢查儲存格填滿色塊
-        const fillArgb = cell.fill?.fgColor?.argb || cell.fill?.bgColor?.argb || '';
-        const cleanHex = fillArgb.replace(/^FF/i, '').toUpperCase();
-        if (colorToShiftMap[cleanHex]) {
-          sVal = colorToShiftMap[cleanHex];
-        }
-        importedSchedule[empObj.id][d] = sVal;
-        empObj.initialShifts[d] = sVal;
+      leftDateCols.forEach(({ col, day }) => {
+        const cell = row.getCell(col);
+        const shiftVal = getShiftFromCell(cell);
+        importedSchedule[empObj.id][day] = shiftVal;
+        empObj.initialShifts[day] = shiftVal;
+        if (shiftVal) discoveredShifts.add(shiftVal);
       });
 
       importedEmployees.push(empObj);
     }
 
     // 讀取右半部員工 (Col 8~13) 若存在
-    if (ws.columnCount >= 10) {
+    if (rightDateCols.length > 0 && ws.columnCount >= 10) {
       for (let r = 3; r <= ws.rowCount; r++) {
         const row = ws.getRow(r);
         const id = row.getCell(8).value;
@@ -1319,33 +1433,32 @@ async function handleImportExcel(file) {
         const nameCell = row.getCell(10);
         const name = nameCell.value;
 
-        if (!name || name === '出勤人數') continue;
+        if (!name || name === '出勤人數' || typeof name !== 'string') continue;
 
         const titleStr = String(title || '保全員').trim();
         newTitles.add(titleStr);
-        const fontColor = nameCell.font?.color?.argb || '';
-        const isFemale = fontColor.includes('FF0000') || fontColor.includes('FF00');
 
+        const fontColor = String(nameCell.font?.color?.argb || '');
+        const isFemale = fontColor.includes('FF0000') || fontColor.slice(-6).toUpperCase() === 'FF0000' ||
+          ['燕', '宜', '萍', '容', '芬', '婷', '伶', '涵', '佳', '真', '晏', '樺', '璇', '嫺', '雯', '綾', '鈴', '羽', '瑩', '琳', '宣'].some(ch => name.includes(ch));
+
+        const empId = (typeof id === 'number' && id > 0) ? id : (importedEmployees.length + 1);
         const empObj = {
-          id: typeof id === 'number' ? id : importedEmployees.length + 1,
+          id: empId,
           title: titleStr,
-          name: String(name).trim(),
+          name: name.trim(),
           gender: isFemale ? 'F' : 'M',
           grade: titleStr === '組長' ? 'S' : (titleStr === '哨長' ? 'A' : 'B'),
           initialShifts: {}
         };
 
         importedSchedule[empObj.id] = {};
-        leftDates.forEach((d, i) => {
-          const cell = row.getCell(11 + i);
-          let sVal = String(cell.value || '').trim();
-          const fillArgb = cell.fill?.fgColor?.argb || cell.fill?.bgColor?.argb || '';
-          const cleanHex = fillArgb.replace(/^FF/i, '').toUpperCase();
-          if (colorToShiftMap[cleanHex]) {
-            sVal = colorToShiftMap[cleanHex];
-          }
-          importedSchedule[empObj.id][d] = sVal;
-          empObj.initialShifts[d] = sVal;
+        rightDateCols.forEach(({ col, day }) => {
+          const cell = row.getCell(col);
+          const shiftVal = getShiftFromCell(cell);
+          importedSchedule[empObj.id][day] = shiftVal;
+          empObj.initialShifts[day] = shiftVal;
+          if (shiftVal) discoveredShifts.add(shiftVal);
         });
 
         importedEmployees.push(empObj);
@@ -1357,9 +1470,42 @@ async function handleImportExcel(file) {
       return;
     }
 
+    // 確保所有出現過的班別都在 state.shifts 中，以保證色塊完整出現
+    const existingShiftMap = new Map(state.shifts.map(s => [s.id, s]));
+    discoveredShifts.forEach(shiftId => {
+      if (!existingShiftMap.has(shiftId)) {
+        state.shifts.push({
+          id: shiftId,
+          name: shiftId,
+          label: `${shiftId} (匯入班別)`,
+          bg: '#E2E8F0',
+          text: '#1E293B',
+          isLeave: ['休', '停', '粉', '綠', '藍'].includes(shiftId),
+          minGrade: 'D',
+          genderReq: 'ANY',
+          defaultDemand: 1
+        });
+      }
+    });
+
+    // 依照編號排序
+    importedEmployees.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+
     state.jobTitles = Array.from(newTitles);
     state.employees = importedEmployees;
     state.schedule = importedSchedule;
+
+    // 自動同步日期區間至檔案所屬區間
+    if (leftDateCols.length > 0) {
+      const days = leftDateCols.map(x => parseInt(x.day, 10)).sort((a, b) => a - b);
+      if (days.length <= 10) {
+        state.dateRangeMode = (days[0] === 16 && days[days.length - 1] === 18) ? 'SAMPLE' : 'CUSTOM';
+        state.customStartDay = days[0];
+        state.customEndDay = days[days.length - 1];
+      }
+    }
+
+    renderSettingsTabs();
     renderApp();
     alert(`成功匯入 ${importedEmployees.length} 位員工與色塊排班資料！`);
   } catch (err) {
@@ -1400,6 +1546,7 @@ function getExportDates() {
 
 // 匯出 Excel (日期純數字 1, 2, 3...，星期純一, 二, 三...)
 async function doExportExcel() {
+  if (!confirm('確定要匯出目前班表為 Excel 檔案嗎？')) return;
   if (!window.ExcelJS) return alert('ExcelJS 載入中，請稍候重試。');
   const dates = getExportDates();
   const rocYear = state.year - 1911;
@@ -1568,6 +1715,7 @@ async function doExportExcel() {
 
 // 匯出手機對稱圖片 (支援指定日期時段裁切)
 async function doExportImage() {
+  if (!confirm('確定要產生並下載手機對稱圖片嗎？')) return;
   if (!window.html2canvas) return alert('html2canvas 載入中，請稍候重試。');
   const targetDates = getExportDates();
   const rocYear = state.year - 1911;
@@ -1607,18 +1755,61 @@ async function doExportImage() {
 
 // 10. 事件綁定初始化
 document.addEventListener('DOMContentLoaded', () => {
+  function updateMainDateRangeDropdowns() {
+    const total = getDaysInMonth(state.year, state.month);
+    const startSel = document.getElementById('view-start-date');
+    const endSel = document.getElementById('view-end-date');
+    if (!startSel || !endSel) return;
+    let opts = '';
+    for (let i = 1; i <= total; i++) {
+      opts += `<option value="${i}">${i} 日</option>`;
+    }
+    startSel.innerHTML = opts;
+    endSel.innerHTML = opts;
+    startSel.value = String(Math.min(state.customStartDay || 1, total));
+    endSel.value = String(Math.min(state.customEndDay || Math.min(18, total), total));
+  }
+
   // 年月份變更
   document.getElementById('select-year').addEventListener('change', (e) => {
     state.year = parseInt(e.target.value, 10);
+    updateMainDateRangeDropdowns();
     renderApp();
   });
   document.getElementById('select-month').addEventListener('change', (e) => {
     state.month = parseInt(e.target.value, 10);
+    updateMainDateRangeDropdowns();
     renderApp();
   });
 
-
-
+  // 主畫面班表日期區間按鈕
+  document.getElementById('btn-view-range-month')?.addEventListener('click', () => {
+    state.dateRangeMode = 'MONTH';
+    renderApp();
+  });
+  document.getElementById('btn-view-range-sample')?.addEventListener('click', () => {
+    state.dateRangeMode = 'SAMPLE';
+    renderApp();
+  });
+  document.getElementById('btn-view-range-custom')?.addEventListener('click', () => {
+    state.dateRangeMode = 'CUSTOM';
+    updateMainDateRangeDropdowns();
+    renderApp();
+  });
+  document.getElementById('view-start-date')?.addEventListener('change', (e) => {
+    state.customStartDay = parseInt(e.target.value, 10);
+    if (state.customEndDay < state.customStartDay) state.customEndDay = state.customStartDay;
+    const endSel = document.getElementById('view-end-date');
+    if (endSel) endSel.value = String(state.customEndDay);
+    renderApp();
+  });
+  document.getElementById('view-end-date')?.addEventListener('change', (e) => {
+    state.customEndDay = parseInt(e.target.value, 10);
+    if (state.customStartDay > state.customEndDay) state.customStartDay = state.customEndDay;
+    const startSel = document.getElementById('view-start-date');
+    if (startSel) startSel.value = String(state.customStartDay);
+    renderApp();
+  });
 
   // 頂部按鈕
   document.getElementById('btn-auto-schedule').addEventListener('click', runAutoSchedule);
@@ -1626,12 +1817,24 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-settings').addEventListener('click', () => openModal('modal-settings'));
   document.getElementById('btn-export').addEventListener('click', () => openModal('modal-export'));
 
-  // 回到預設值
+  // 清空排班與回到預設值
+  document.getElementById('btn-clear-schedule').addEventListener('click', clearAllSchedule);
   document.getElementById('btn-reset-defaults').addEventListener('click', resetToDefaults);
+
+  // 手機版底部工具列按鈕綁定
+  document.getElementById('m-tool-import')?.addEventListener('click', () => document.getElementById('btn-import-excel').click());
+  document.getElementById('m-tool-clear')?.addEventListener('click', clearAllSchedule);
+  document.getElementById('m-tool-reset')?.addEventListener('click', resetToDefaults);
+  document.getElementById('m-tool-settings')?.addEventListener('click', () => openModal('modal-settings'));
+  document.getElementById('m-tool-export')?.addEventListener('click', () => openModal('modal-export'));
 
   // 匯入 Excel 觸發
   const fileInput = document.getElementById('input-import-file');
-  document.getElementById('btn-import-excel').addEventListener('click', () => fileInput.click());
+  document.getElementById('btn-import-excel').addEventListener('click', () => {
+    if (confirm('確定要選擇並匯入 Excel 班表檔案嗎？')) {
+      fileInput.click();
+    }
+  });
   fileInput.addEventListener('change', (e) => {
     if (e.target.files && e.target.files[0]) {
       handleImportExcel(e.target.files[0]);
@@ -1639,28 +1842,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 清空排班
-  document.getElementById('btn-clear-schedule').addEventListener('click', () => {
-    if (confirm('確定清空非鎖定的排班嗎？已預排的假別及已鎖定之班別將會妥善保留。')) {
-      const dates = getDatesArray();
-      const shiftMap = new Map(state.shifts.map(s => [s.id, s]));
-      state.employees.forEach(emp => {
-        dates.forEach(d => {
-          const s = state.schedule[emp.id]?.[d];
-          const isL = state.lockedCells[`${emp.id}_${d}`];
-          const obj = shiftMap.get(s);
-          if (!isL && (!obj || !obj.isLeave)) {
-            state.schedule[emp.id][d] = '';
-          }
-        });
-      });
-      renderApp();
-    }
-  });
-
   // 快速選班事件
   document.getElementById('btn-picker-close').addEventListener('click', closeQuickPicker);
-  document.getElementById('btn-picker-clear').addEventListener('click', () => selectShift(''));
+  document.getElementById('btn-picker-clear').addEventListener('click', () => {
+    if (confirm('確定要清除此格排班嗎？')) {
+      selectShift('');
+    }
+  });
   document.getElementById('btn-picker-lock').addEventListener('click', () => {
     if (!state.activePicker) return;
     const { empId, dateStr } = state.activePicker;
@@ -1690,8 +1878,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!empId) return alert('請選擇員工！');
     const checked = Array.from(document.querySelectorAll('input[name="spec-shift-cb"]:checked')).map(cb => cb.value);
     if (checked.length === 0) return alert('請至少勾選一個限定班別！');
+    if (!confirm('確定要新增此員工專屬班別限制嗎？')) return;
 
-    // 檢查是否已有該員工限定
     const exist = (state.rulesConfig.specificShifts || []).find(r => r.empId === empId);
     if (exist) {
       exist.allowedShiftIds = checked;
@@ -1713,6 +1901,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const id1 = parseInt(document.getElementById('conflict-emp1').value, 10);
     const id2 = parseInt(document.getElementById('conflict-emp2').value, 10);
     if (!id1 || !id2 || id1 === id2) return alert('請選擇兩位不同的員工！');
+    if (!confirm('確定要新增此互斥衝突限制嗎？')) return;
     state.rulesConfig.conflicts.push({
       id: `c_${Date.now()}`,
       empId1: id1,
@@ -1729,6 +1918,7 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const id = document.getElementById('input-grade-id').value.trim().toUpperCase();
     if (state.grades.some(g => g.id === id)) return alert('已有相同等級代號！');
+    if (!confirm(`確定要新增等級「${id}」嗎？`)) return;
     state.grades.push({
       id,
       name: document.getElementById('input-grade-name').value.trim() || `${id} 級`,
@@ -1746,6 +1936,7 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const name = document.getElementById('input-shift-name').value.trim();
     if (state.shifts.some(s => s.id === name)) return alert('已有相同名稱班別！');
+    if (!confirm(`確定要新增班別「${name}」嗎？`)) return;
     const isLeave = document.getElementById('input-shift-category').value === 'leave';
     state.shifts.push({
       id: name,
@@ -1756,28 +1947,40 @@ document.addEventListener('DOMContentLoaded', () => {
       isLeave: isLeave,
       minGrade: document.getElementById('input-shift-mingrade').value,
       genderReq: document.getElementById('input-shift-gender').value,
-      defaultDemand: parseInt(document.getElementById('input-shift-demand').value, 10) || 1
+      defaultDemand: parseInt(document.getElementById('input-shift-demand')?.value, 10) || 1
     });
     document.getElementById('input-shift-name').value = '';
     renderSettingsTabs();
     renderApp();
   });
 
-  // 員工表單 (下拉式職稱)
+  // 員工表單 (下拉式職稱，支援自訂/自動編號)
   document.getElementById('form-add-employee').addEventListener('submit', (e) => {
     e.preventDefault();
     const name = document.getElementById('input-emp-name').value.trim();
     if (!name) return;
-    const maxId = state.employees.reduce((m, emp) => Math.max(m, emp.id), 0);
+    const customIdVal = document.getElementById('input-emp-id')?.value;
+    let newId;
+    if (customIdVal && !isNaN(parseInt(customIdVal, 10)) && parseInt(customIdVal, 10) > 0) {
+      newId = parseInt(customIdVal, 10);
+      if (state.employees.some(emp => emp.id === newId)) {
+        return alert(`員工編號 ${newId} 已經存在！請使用其他編號。`);
+      }
+    } else {
+      newId = state.employees.reduce((m, emp) => Math.max(m, emp.id), 0) + 1;
+    }
+    if (!confirm(`確定要新增員工「${name}」(編號: ${newId}) 嗎？`)) return;
     state.employees.push({
-      id: maxId + 1,
+      id: newId,
       title: document.getElementById('input-emp-title-select').value,
       name: name,
       gender: document.getElementById('input-emp-gender').value,
       grade: document.getElementById('input-emp-grade').value,
       initialShifts: {}
     });
+    state.employees.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
     document.getElementById('input-emp-name').value = '';
+    if (document.getElementById('input-emp-id')) document.getElementById('input-emp-id').value = '';
     renderSettingsTabs();
     renderApp();
   });
@@ -1788,6 +1991,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const t = document.getElementById('input-custom-title').value.trim();
     if (!t) return;
     if (state.jobTitles.includes(t)) return alert('已存在此職稱！');
+    if (!confirm(`確定要新增職稱「${t}」嗎？`)) return;
     state.jobTitles.push(t);
     document.getElementById('input-custom-title').value = '';
     renderSettingsTabs();
@@ -1832,6 +2036,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-do-export-excel').addEventListener('click', doExportExcel);
   document.getElementById('btn-do-export-image').addEventListener('click', doExportImage);
 
-  // 初始化首次渲染
+  // 初始化自訂區間下拉選單與首次渲染
+  updateMainDateRangeDropdowns();
   renderApp();
 });

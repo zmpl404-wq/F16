@@ -198,6 +198,12 @@ body {
   background: #d1fae5;
 }
 
+.btn-sm {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.76rem;
+  gap: 0.25rem;
+}
+
 /* 違規徽章 */
 .btn-violation {
   background: #fff1f2;
@@ -746,22 +752,14 @@ thead th.col-sticky-1, thead th.col-sticky-2, thead th.col-sticky-3 {
 
 /* 手機版型自適應 (Mobile Responsive Optimizations) */
 @media (max-width: 768px) {
-  /* 導覽列 */
+  /* 導覽列：移除品牌字樣與圖示，由規則檢視與一鍵自動排班兩按鈕等大並排占滿頂部 */
+  .brand-section {
+    display: none !important;
+  }
+
   .navbar {
-    padding: 0.6rem 0.75rem;
-    flex-wrap: nowrap;
-  }
-
-  .brand-sub {
-    display: none;
-  }
-
-  .brand-title {
-    font-size: 0.88rem;
-  }
-
-  .brand-badge {
-    display: none;
+    padding: 0.5rem 0.65rem;
+    width: 100%;
   }
 
   /* 桌面版按鈕在手機上隱藏 */
@@ -769,19 +767,22 @@ thead th.col-sticky-1, thead th.col-sticky-2, thead th.col-sticky-3 {
     display: none !important;
   }
 
-  /* 手機版頂部按鈕：規則檢視 + 自動排班 (等大並排) */
+  /* 手機版頂部按鈕：規則檢視 + 一鍵自動排班 (等大並排，占滿手機上方) */
   .mobile-top-nav {
     display: flex !important;
-    gap: 0.4rem;
-    flex: 1;
-    margin-left: 0.5rem;
+    gap: 0.5rem;
+    width: 100%;
+    margin: 0;
   }
 
   .mobile-top-nav .btn {
     flex: 1;
+    width: 50%;
+    height: 42px;
     justify-content: center;
     padding: 0.45rem 0.5rem;
-    font-size: 0.78rem;
+    font-size: 0.85rem;
+    font-weight: 700;
   }
 
   /* 手機版底部工具列 */
