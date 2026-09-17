@@ -118,6 +118,79 @@ const INITIAL_EMPLOYEES = [
 ];
 
 // 全域狀態管理
+const STORAGE_KEY = 'f16_schedule_v1';
+
+function saveState() {
+  try {
+    const toSave = {
+      year: state.year,
+      month: state.month,
+      jobTitles: state.jobTitles,
+      employees: state.employees,
+      shifts: state.shifts,
+      grades: state.grades,
+      rulesConfig: state.rulesConfig,
+      schedule: state.schedule,
+      lockedCells: state.lockedCells
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    const el = document.getElementById('stat-save-status');
+    if (el) { el.innerText = '💾 已自動儲存'; el.style.color = '#059669'; }
+  } catch(e) {
+    console.warn('localStorage save failed:', e);
+  }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+    if (saved.year) state.year = saved.year;
+    if (saved.month) state.month = saved.month;
+    if (saved.jobTitles && saved.jobTitles.length) state.jobTitles = saved.jobTitles;
+    if (saved.employees && saved.employees.length) state.employees = saved.employees;
+    if (saved.shifts && saved.shifts.length) state.shifts = saved.shifts;
+    if (saved.grades && saved.grades.length) state.grades = saved.grades;
+    if (saved.rulesConfig) state.rulesConfig = Object.assign(state.rulesConfig, saved.rulesConfig);
+    if (saved.schedule) state.schedule = saved.schedule;
+    if (saved.lockedCells) state.lockedCells = saved.lockedCells;
+    return true;
+  } catch(e) {
+    console.warn('localStorage load failed:', e);
+    return false;
+  }
+}
+
+function resetToDefaults() {
+  if (!confirm('確定回到預設值嗎？這將清除所有目前的排班資料與設定，恢復至系統初始狀態。')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  state.year = 2026;
+  state.month = 9;
+  state.jobTitles = [...DEFAULT_TITLES];
+  state.employees = JSON.parse(JSON.stringify(INITIAL_EMPLOYEES));
+  state.shifts = [...LEAVE_SHIFTS, ...WORK_SHIFTS];
+  state.grades = JSON.parse(JSON.stringify(DEFAULT_GRADES));
+  state.rulesConfig = {
+    maxConsecutiveDays: 5,
+    excludedTitles: ['中控'],
+    conflicts: [{ id: 'c1', empId1: 2, empId2: 3, reason: '袁國峻 與 何峻岱 哨長不可在同一個班別' }],
+    specificShifts: [],
+    workingHoursPerDay: 12
+  };
+  state.schedule = {};
+  state.lockedCells = {};
+  state.highlightCell = null;
+  // sync year/month selects
+  const ySel = document.getElementById('select-year');
+  const mSel = document.getElementById('select-month');
+  if (ySel) ySel.value = '2026';
+  if (mSel) mSel.value = '9';
+  initSchedule();
+  renderApp();
+  saveState();
+}
+
 let state = {
   year: 2026,
   month: 9,
@@ -131,13 +204,12 @@ let state = {
     conflicts: [
       { id: 'c1', empId1: 2, empId2: 3, reason: '袁國峻 與 何峻岱 哨長不可在同一個班別' }
     ],
-    // 指定某員工只能排特定班別: [{ id, empId, allowedShiftIds: [] }]
     specificShifts: [],
     workingHoursPerDay: 12
   },
   schedule: {},
   lockedCells: {},
-  viewMode: 'standard', // 'standard' | 'split'
+  viewMode: 'standard',
   highlightCell: null,
   activeSettingsTab: 'rules',
   activePicker: null,
@@ -156,6 +228,8 @@ function initSchedule() {
   });
 }
 initSchedule();
+// 嘗試從 localStorage 載入已儲存狀態
+loadState();
 
 function getDaysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
@@ -460,13 +534,19 @@ function runAutoSchedule() {
   }
 }
 
-// 4. 表格渲染 (標準寬表 & 對稱雙欄)
+// 4. 表格渲染 (標準寬表)
 function renderApp() {
   const dates = getDatesArray();
   const violations = validateSchedule();
   const violationSet = new Set(violations.map(v => `${v.empId}_${v.date}`));
   const shiftMap = new Map(state.shifts.map(s => [s.id, s]));
   const rocYear = state.year - 1911;
+
+  // 同步年月下拉選單
+  const ySel = document.getElementById('select-year');
+  const mSel = document.getElementById('select-month');
+  if (ySel && ySel.value !== String(state.year)) ySel.value = String(state.year);
+  if (mSel && mSel.value !== String(state.month)) mSel.value = String(state.month);
 
   document.getElementById('standard-title-text').innerText = 
     `📅 F16日班 ${rocYear}.${String(state.month).padStart(2, '0')}月份排班表 (全體人員完整檢視)`;
@@ -490,8 +570,11 @@ function renderApp() {
   }
 
   renderStandardTable(dates, shiftMap, violationSet);
-  renderSplitTable(dates, shiftMap, violationSet, rocYear);
+  renderSplitTable(dates, shiftMap, new Set(), rocYear); // 保持隱藏的對稱表同步
   renderInspectorModal(violations);
+
+  // 儲存狀態
+  saveState();
 }
 
 function renderStandardTable(dates, shiftMap, violationSet) {
@@ -951,7 +1034,9 @@ function renderEmployeeTable(list) {
   const eBody = document.getElementById('employees-table-body');
   eBody.innerHTML = list.map(emp => `
     <tr style="border-bottom:1px solid var(--border-color)">
-      <td style="padding:4px; font-weight:600; color:var(--text-muted)">${emp.id}</td>
+      <td style="padding:4px">
+        <input type="number" min="1" max="999" value="${emp.id}" class="form-input" style="padding:2px 4px; font-size:0.8rem; width:60px; font-weight:600; color:var(--text-muted)" onchange="updateEmpId(${emp.id}, parseInt(this.value,10)||${emp.id})" />
+      </td>
       <td style="padding:4px">
         <select class="form-select" style="padding:2px 4px; font-size:0.8rem; width:95px" onchange="updateEmpField(${emp.id}, 'title', this.value)">
           ${state.jobTitles.map(t => `<option value="${t}" ${emp.title === t ? 'selected' : ''}>${t}</option>`).join('')}
@@ -972,7 +1057,7 @@ function renderEmployeeTable(list) {
         </select>
       </td>
       <td style="padding:4px">
-        <button type="button" onclick="deleteEmp(${emp.id})" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button>
+        <button type="button" onclick="deleteEmp(${emp.id})" style="background:none; border:none; color:#e11d48; cursor:pointer">×</button>
       </td>
     </tr>
   `).join('');
@@ -1048,6 +1133,46 @@ window.deleteShift = function(sId) {
   renderApp();
 };
 
+window.updateEmpId = function(oldId, newId) {
+  if (isNaN(newId) || newId <= 0) return;
+  if (newId === oldId) return;
+  if (state.employees.some(e => e.id === newId)) {
+    alert('已存在此編號的員工！');
+    renderEmployeeTable(state.employees);
+    return;
+  }
+  const emp = state.employees.find(e => e.id === oldId);
+  if (!emp) return;
+  // 更新 schedule keys
+  if (state.schedule[oldId]) {
+    state.schedule[newId] = state.schedule[oldId];
+    delete state.schedule[oldId];
+  }
+  // 更新 lockedCells keys
+  const newLocked = {};
+  Object.keys(state.lockedCells).forEach(k => {
+    if (k.startsWith(`${oldId}_`)) {
+      newLocked[`${newId}_${k.slice(String(oldId).length + 1)}`] = state.lockedCells[k];
+    } else {
+      newLocked[k] = state.lockedCells[k];
+    }
+  });
+  state.lockedCells = newLocked;
+  // 更新 conflicts
+  (state.rulesConfig.conflicts || []).forEach(c => {
+    if (c.empId1 === oldId) c.empId1 = newId;
+    if (c.empId2 === oldId) c.empId2 = newId;
+  });
+  (state.rulesConfig.specificShifts || []).forEach(r => {
+    if (r.empId === oldId) r.empId = newId;
+  });
+  emp.id = newId;
+  // 重新排序
+  state.employees.sort((a, b) => a.id - b.id);
+  renderSettingsTabs();
+  renderApp();
+};
+
 window.updateEmpField = function(empId, field, val) {
   const emp = state.employees.find(e => e.id === empId);
   if (emp) emp[field] = val;
@@ -1074,32 +1199,73 @@ async function handleImportExcel(file) {
     await wb.xlsx.load(arrayBuffer);
     const ws = wb.worksheets[0];
 
-    // 色塊代號映射表 (ARGB hex -> 班別/假別 ID)
+    // 色塊代號映射表 - 支援多種 ARGB 格式變體
+    // 原始色值 (去除前綴 FF 後的 6 位 RGB hex)
     const colorToShiftMap = {
-      'FFC7CE': '休',
-      '262626': '停',
-      'FCE4D6': '粉',
-      'C6EFCE': '綠',
-      'BDD7EE': '藍'
+      'FFC7CE': '休',  // 紅色系休假
+      'FFCCCC': '休',  // 淡紅
+      'FF0000': '休',  // 純紅 (備用)
+      '262626': '停',  // 停休 (深灰近黑)
+      '000000': '停',  // 純黑 (備用)
+      '1F1F1F': '停',  // 深灰
+      'FCE4D6': '粉',  // 粉假
+      'F4CCCC': '粉',  // 淡粉
+      'FFD9C2': '粉',  // 暖橙
+      'C6EFCE': '綠',  // 綠假
+      'D9EAD3': '綠',  // 淡綠
+      'BDD7EE': '藍',  // 藍假
+      'CFE2F3': '藍',  // 淡藍
+      'D9E1F2': '藍'   // 淡藍紫
     };
+
+    // 顏色匹配函數：容許輕微顏色差異
+    function matchColor(argbStr) {
+      if (!argbStr) return null;
+      const hex = argbStr.replace(/^FF/i, '').toUpperCase().replace('#', '');
+      if (colorToShiftMap[hex]) return colorToShiftMap[hex];
+      // 模糊匹配 (色差容忍)
+      try {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        // 紅色系 (高R、低G、低B)
+        if (r > 200 && g < 170 && b < 210) return '休';
+        // 近黑色 (低RGB均值)
+        if (r < 50 && g < 50 && b < 50) return '停';
+        // 綠色系 (高G)
+        if (g > 190 && r < 220 && b < 220 && g > r && g > b) return '綠';
+        // 藍色系 (高B)
+        if (b > 180 && r < 220 && g < 240 && b > g && b > r) return '藍';
+        // 粉橙系 (高R、中G)
+        if (r > 220 && g > 200 && b < 200) return '粉';
+      } catch(_) {}
+      return null;
+    }
 
     const importedEmployees = [];
     const importedSchedule = {};
     const newTitles = new Set(state.jobTitles);
 
-    // 檢查是否為原檔對稱雙欄版型 (Row 2 有日期 16, 17, 18 或 1..30)
+    // 掃描第2列找到日期欄 (先掃左半部 col D~F, 或更多)
     let leftDates = [];
-    for (let c = 4; c <= 6; c++) {
+    for (let c = 4; c <= Math.min(35, ws.columnCount); c++) {
       const v = ws.getRow(2).getCell(c).value;
-      if (v !== null && v !== undefined && v !== '') leftDates.push(String(v));
-    }
-    if (leftDates.length === 0) {
-      // 嘗試讀取單表 1..31
-      for (let c = 4; c <= ws.columnCount; c++) {
-        const v = ws.getRow(1).getCell(c).value || ws.getRow(2).getCell(c).value;
-        if (v) leftDates.push(String(v).replace('號', ''));
+      if (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) {
+        leftDates.push(String(Number(v)));
+      } else if (leftDates.length > 0) {
+        break; // 遇到空格就停止
       }
     }
+    if (leftDates.length === 0) {
+      // 嘗試第1列
+      for (let c = 4; c <= Math.min(35, ws.columnCount); c++) {
+        const v = ws.getRow(1).getCell(c).value;
+        if (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) {
+          leftDates.push(String(Number(v)));
+        }
+      }
+    }
+
 
     // 讀取左半部員工
     for (let r = 3; r <= ws.rowCount; r++) {
@@ -1407,15 +1573,22 @@ async function doExportImage() {
   const rocYear = state.year - 1911;
   const shiftMap = new Map(state.shifts.map(s => [s.id, s]));
 
-  // 暫時將對稱雙欄表格以選取之 targetDates 重新渲染
+  // 更新隱藏的對稱雙欄表格
   renderSplitTable(targetDates, shiftMap, new Set(), rocYear);
   const container = document.getElementById('container-split-view');
-  const wasHidden = container.style.display === 'none';
-  if (wasHidden) container.style.display = 'block';
+  
+  // 暫時顯示於可見位置以供 html2canvas 截圖
+  const origStyle = container.getAttribute('style');
+  container.setAttribute('style', 'position:fixed; left:0; top:0; overflow:visible; visibility:visible; z-index:-100; background:#fff;');
 
   try {
     const el = document.getElementById('split-view-capture-area');
-    const canvas = await window.html2canvas(el, { scale: 2, backgroundColor: '#ffffff' });
+    const canvas = await window.html2canvas(el, { 
+      scale: 2, 
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      allowTaint: true
+    });
     const imgData = canvas.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = imgData;
@@ -1425,13 +1598,12 @@ async function doExportImage() {
     console.error('Image export failed:', err);
     alert('圖片產生失敗，請重試。');
   } finally {
-    // 恢復全月渲染
+    // 恢復隱藏狀態
+    container.setAttribute('style', origStyle || 'position:absolute; left:-9999px; top:-9999px; overflow:visible; visibility:hidden;');
     renderSplitTable(getDatesArray(), shiftMap, new Set(), rocYear);
-    if (wasHidden && state.viewMode === 'standard') {
-      container.style.display = 'none';
-    }
   }
 }
+
 
 // 10. 事件綁定初始化
 document.addEventListener('DOMContentLoaded', () => {
@@ -1445,28 +1617,17 @@ document.addEventListener('DOMContentLoaded', () => {
     renderApp();
   });
 
-  // 檢視模式切換
-  document.getElementById('view-mode-standard').addEventListener('click', () => {
-    state.viewMode = 'standard';
-    document.getElementById('view-mode-standard').classList.add('active');
-    document.getElementById('view-mode-split').classList.remove('active');
-    document.getElementById('container-standard-view').style.display = 'block';
-    document.getElementById('container-split-view').style.display = 'none';
-  });
 
-  document.getElementById('view-mode-split').addEventListener('click', () => {
-    state.viewMode = 'split';
-    document.getElementById('view-mode-split').classList.add('active');
-    document.getElementById('view-mode-standard').classList.remove('active');
-    document.getElementById('container-split-view').style.display = 'block';
-    document.getElementById('container-standard-view').style.display = 'none';
-  });
+
 
   // 頂部按鈕
   document.getElementById('btn-auto-schedule').addEventListener('click', runAutoSchedule);
   document.getElementById('btn-inspector').addEventListener('click', () => openModal('modal-inspector'));
   document.getElementById('btn-settings').addEventListener('click', () => openModal('modal-settings'));
   document.getElementById('btn-export').addEventListener('click', () => openModal('modal-export'));
+
+  // 回到預設值
+  document.getElementById('btn-reset-defaults').addEventListener('click', resetToDefaults);
 
   // 匯入 Excel 觸發
   const fileInput = document.getElementById('input-import-file');

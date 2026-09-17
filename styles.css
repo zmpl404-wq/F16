@@ -739,10 +739,17 @@ thead th.col-sticky-1, thead th.col-sticky-2, thead th.col-sticky-3 {
   color: #be123c;
 }
 
+/* 桌面版：顯示全部導覽按鈕，隱藏手機版元素 */
+.desktop-nav { display: flex; }
+.mobile-top-nav { display: none; }
+.mobile-bottom-toolbar { display: none; }
+
 /* 手機版型自適應 (Mobile Responsive Optimizations) */
 @media (max-width: 768px) {
+  /* 導覽列 */
   .navbar {
     padding: 0.6rem 0.75rem;
+    flex-wrap: nowrap;
   }
 
   .brand-sub {
@@ -750,11 +757,89 @@ thead th.col-sticky-1, thead th.col-sticky-2, thead th.col-sticky-3 {
   }
 
   .brand-title {
-    font-size: 0.92rem;
+    font-size: 0.88rem;
   }
 
-  .nav-actions {
-    gap: 0.35rem;
+  .brand-badge {
+    display: none;
+  }
+
+  /* 桌面版按鈕在手機上隱藏 */
+  .desktop-nav {
+    display: none !important;
+  }
+
+  /* 手機版頂部按鈕：規則檢視 + 自動排班 (等大並排) */
+  .mobile-top-nav {
+    display: flex !important;
+    gap: 0.4rem;
+    flex: 1;
+    margin-left: 0.5rem;
+  }
+
+  .mobile-top-nav .btn {
+    flex: 1;
+    justify-content: center;
+    padding: 0.45rem 0.5rem;
+    font-size: 0.78rem;
+  }
+
+  /* 手機版底部工具列 */
+  .mobile-bottom-toolbar {
+    display: flex !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 99;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border-color);
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.08);
+    padding: 0.4rem 0.5rem;
+    padding-bottom: calc(0.4rem + env(safe-area-inset-bottom));
+    gap: 0.25rem;
+    justify-content: space-around;
+  }
+
+  .mobile-tool-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.3rem 0.4rem;
+    border-radius: var(--radius-md);
+    color: var(--text-muted);
+    font-size: 0.62rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    flex: 1;
+    transition: all var(--transition);
+  }
+
+  .mobile-tool-btn:active {
+    background: var(--bg-subtle);
+    transform: scale(0.95);
+  }
+
+  .mobile-tool-btn svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* 控制列 */
+  .control-bar {
+    padding: 0.45rem 0.75rem;
+    gap: 0.4rem;
+  }
+
+  .control-group {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .btn {
@@ -767,23 +852,15 @@ thead th.col-sticky-1, thead th.col-sticky-2, thead th.col-sticky-3 {
     height: 14px;
   }
 
-  .control-bar {
-    padding: 0.5rem 0.75rem;
-    gap: 0.5rem;
-  }
-
-  .control-group {
-    width: 100%;
-    justify-content: space-between;
-  }
-
+  /* 增加底部工具列佔位空間 */
   .schedule-viewport {
     padding: 0.5rem;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
   }
 
   .modal-dialog {
     max-width: 98vw;
-    max-height: 95vh;
+    max-height: 90vh;
   }
 
   .modal-header, .modal-body, .modal-footer {
