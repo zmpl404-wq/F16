@@ -11,7 +11,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- 核心樣式表 -->
   <link rel="stylesheet" href="styles.css" />
-  <!-- 必要工具庫 CDN (直接點開 index.html 即可使用，無需本地伺服器編譯) -->
+  <!-- 必要工具庫 (優先載入本機檔案，附 CDN 備用) -->
+  <script src="exceljs.min.js"></script>
+  <script src="html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
@@ -20,20 +22,6 @@
   <div class="app-container">
     <!-- 頂部導航列 -->
     <header class="navbar">
-      <div class="brand-section">
-        <div class="brand-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-        </div>
-        <div>
-          <div class="brand-title">
-            F16 智慧自動化排班系統
-            <span class="brand-badge">PRO v1.2</span>
-          </div>
-          <div class="brand-sub">
-            等級限制 · 專屬班別限制 · 性別限制 · 互斥防護 · Excel/色塊匯入匯出
-          </div>
-        </div>
-      </div>
 
       <!-- 桌面版導覽列操作區 (手機版隱藏，改用底部工具列) -->
       <div class="nav-actions desktop-nav">
