@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="description" content="專業智慧自動化排班系統 - 支援等級位階、性別限制、互斥限制、休假鎖定保護、Excel自訂樣式匯出與對稱手機圖片輸出" />
   <title>F16 智慧自動化排班系統</title>
   <!-- Google Fonts: Inter & Noto Sans TC -->
@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- 核心樣式表 -->
   <link rel="stylesheet" href="styles.css" />
-  <!-- 必要工具庫 CDN (直接點開 index.html 即可使用，無需編譯) -->
+  <!-- 必要工具庫 CDN (直接點開 index.html 即可使用，無需本地伺服器編譯) -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
@@ -22,15 +22,15 @@
     <header class="navbar">
       <div class="brand-section">
         <div class="brand-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
         </div>
         <div>
           <div class="brand-title">
             F16 智慧自動化排班系統
-            <span class="brand-badge">PRO v1.0</span>
+            <span class="brand-badge">PRO v1.2</span>
           </div>
           <div class="brand-sub">
-            等級位階限制 · 性別限制 · 互斥避免 · 假別保護 · 對稱手機匯出
+            等級限制 · 專屬班別限制 · 性別限制 · 互斥防護 · Excel/色塊匯入匯出
           </div>
         </div>
       </div>
@@ -38,32 +38,39 @@
       <div class="nav-actions">
         <!-- 違規檢驗按鈕 -->
         <button id="btn-inspector" class="btn btn-success" title="檢視規則符合性">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
           <span id="inspector-label">規則完全符合</span>
           <span id="violation-badge" class="violation-count" style="display:none;">0</span>
         </button>
 
         <!-- 一鍵自動排班 -->
         <button id="btn-auto-schedule" class="btn btn-primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>
-          <span>一鍵智慧自動排班</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>
+          <span>一鍵自動排班</span>
         </button>
+
+        <!-- 匯入 Excel 班表 -->
+        <button id="btn-import-excel" class="btn btn-secondary" style="background:#f0f9ff; border-color:#bae6fd; color:#0369a1" title="依照色塊與文字匯入 EXCEL 檔">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          <span>匯入班表</span>
+        </button>
+        <input type="file" id="input-import-file" accept=".xlsx" style="display:none" />
 
         <!-- 清空非鎖定排班 -->
         <button id="btn-clear-schedule" class="btn btn-secondary" title="清空非鎖定之自動排班內容">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21h5v-5"></path></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21h5v-5"></path></svg>
           <span>清空排班</span>
         </button>
 
         <!-- 規則與員工設定 -->
         <button id="btn-settings" class="btn btn-secondary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-          <span>自訂規則與員工</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>規則與管理</span>
         </button>
 
         <!-- 匯出班表 -->
         <button id="btn-export" class="btn btn-secondary" style="background:#ecfdf5; border-color:#a7f3d0; color:#065f46">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           <span>匯出班表</span>
         </button>
       </div>
@@ -74,7 +81,7 @@
       <div class="control-group">
         <!-- 年月份選擇 -->
         <div class="date-selector-box">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" style="width:16px;height:16px"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
           <select id="select-year">
             <option value="2025">民國 114 年 (2025)</option>
             <option value="2026" selected>民國 115 年 (2026)</option>
@@ -93,22 +100,22 @@
         <div class="view-toggle">
           <button id="view-mode-standard" class="view-toggle-btn active">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-            完整全寬度檢視
+            完整寬表
           </button>
           <button id="view-mode-split" class="view-toggle-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="3" x2="12" y2="21"></line><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>
-            對稱雙欄檢視 (手機圖片版型)
+            對稱雙欄 (手機圖片版型)
           </button>
         </div>
       </div>
 
       <!-- 統計摘要 -->
       <div class="control-group" style="font-size:0.82rem; color:var(--text-muted)">
-        <span>總在職員工: <strong id="stat-emp-count" style="color:var(--text-main)">56</strong> 人</span>
+        <span>總在職: <strong id="stat-emp-count" style="color:var(--text-main)">56</strong> 人</span>
         <span>•</span>
         <span>連上上限: <strong id="stat-max-consecutive" style="color:var(--text-main)">5</strong> 天</span>
         <span>•</span>
-        <span>工時基準: <strong style="color:var(--text-main)">12</strong> 小時/班</span>
+        <span>工時基準: <strong style="color:var(--text-main)">12</strong> H/班</span>
         <span>•</span>
         <span>已鎖定: <strong id="stat-locked-count" style="color:var(--primary)">0</strong> 格</span>
       </div>
@@ -123,7 +130,7 @@
             📅 F16日班 115.09月份排班表 (全體人員完整檢視)
           </div>
           <div style="font-size:0.8rem; opacity:0.9">
-            💡 點擊任一儲存格可快速選班、設定休假或鎖定
+            💡 點擊儲存格可快速選班、設定休假或鎖定
           </div>
         </div>
         <div class="table-scroll-container">
@@ -144,7 +151,7 @@
           </div>
         </div>
         <div class="table-scroll-container" style="padding:8px">
-          <div id="split-view-capture-area" style="background:#ffffff; padding:16px; border-radius:8px; display:inline-block; min-width:100%">
+          <div id="split-view-capture-area" style="background:#ffffff; padding:12px; border-radius:8px; display:inline-block; min-width:100%">
             <table id="table-split" class="schedule-table" style="width:100%; border:1px solid #cbd5e1">
               <!-- 由 app.js 動態渲染 -->
             </table>
@@ -160,7 +167,7 @@
           <span id="picker-emp-name" style="font-weight:700; font-size:0.9rem"></span>
           <span id="picker-date-info" style="font-size:0.75rem; color:var(--text-muted); margin-left:6px"></span>
         </div>
-        <button id="btn-picker-close" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:16px">&times;</button>
+        <button id="btn-picker-close" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:18px">&times;</button>
       </div>
 
       <div style="display:flex; gap:0.5rem; margin-bottom:0.65rem">
@@ -191,7 +198,7 @@
           <button class="modal-close-btn" onclick="closeModal('modal-inspector')">&times;</button>
         </div>
         <div class="modal-body">
-          <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:0.75rem; margin-bottom:1.25rem">
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.6rem; margin-bottom:1.25rem">
             <div id="card-filter-streak" style="padding:0.65rem; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-subtle); text-align:center; cursor:pointer">
               <div style="font-size:0.75rem; color:var(--text-muted)">連上超過上限</div>
               <div id="stat-count-streak" style="font-size:1.25rem; font-weight:800; color:#059669">0</div>
@@ -208,12 +215,16 @@
               <div style="font-size:0.75rem; color:var(--text-muted)">互斥同班衝突</div>
               <div id="stat-count-conflict" style="font-size:1.25rem; font-weight:800; color:#059669">0</div>
             </div>
+            <div id="card-filter-specific" style="padding:0.65rem; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-subtle); text-align:center; cursor:pointer">
+              <div style="font-size:0.75rem; color:var(--text-muted)">專屬班別限制</div>
+              <div id="stat-count-specific" style="font-size:1.25rem; font-weight:800; color:#059669">0</div>
+            </div>
           </div>
           <div id="inspector-violations-list"></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal('modal-inspector'); openModal('modal-settings')">
-            調整連續天數或規則設定
+            調整限制與設定
           </button>
           <button class="btn btn-primary" onclick="closeModal('modal-inspector')">關閉檢視</button>
         </div>
@@ -222,7 +233,7 @@
 
     <!-- 彈窗 2：系統自訂規則與員工管理 -->
     <div id="modal-settings" class="modal-backdrop">
-      <div class="modal-dialog" style="max-width:900px">
+      <div class="modal-dialog">
         <div class="modal-header">
           <div class="modal-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" style="width:20px;height:20px"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -230,103 +241,126 @@
           </div>
           <button class="modal-close-btn" onclick="closeModal('modal-settings')">&times;</button>
         </div>
-        <div style="padding:0.75rem 1.5rem 0; background:var(--bg-subtle)">
+        <div style="padding:0.65rem 1.25rem 0; background:var(--bg-subtle)">
           <div class="tabs-nav" style="margin-bottom:0">
             <button id="tab-btn-rules" class="tab-btn active" onclick="switchSettingsTab('rules')">⚙️ 排班限制條件</button>
-            <button id="tab-btn-grades" class="tab-btn" onclick="switchSettingsTab('grades')">🏅 等級位階制度</button>
-            <button id="tab-btn-shifts" class="tab-btn" onclick="switchSettingsTab('shifts')">🏷️ 班別與假別</button>
+            <button id="tab-btn-grades" class="tab-btn" onclick="switchSettingsTab('grades')">🏅 等級位階 (支援直接編輯)</button>
+            <button id="tab-btn-shifts" class="tab-btn" onclick="switchSettingsTab('shifts')">🏷️ 班別假別 (支援直接編輯)</button>
             <button id="tab-btn-employees" class="tab-btn" onclick="switchSettingsTab('employees')">👥 員工管理</button>
+            <button id="tab-btn-titles" class="tab-btn" onclick="switchSettingsTab('titles')">👔 職稱選單自訂</button>
           </div>
         </div>
         <div class="modal-body">
           <!-- Tab 1: Rules -->
           <div id="tab-pane-rules">
-            <div style="background:var(--bg-subtle); padding:1rem; borderRadius:8px; margin-bottom:1.25rem">
-              <h4 style="font-size:0.95rem; font-weight:700; margin-bottom:0.5rem">連續上班天數上限設定</h4>
-              <div style="display:flex; align-items:center; gap:1rem">
-                <div style="flex:1">
-                  <label class="form-label">員工不可連續上班超過幾天 (預設 5 天)</label>
-                  <input type="number" id="input-max-consecutive" min="1" max="14" class="form-input" style="width:140px" value="5" />
+            <!-- 連上限制 -->
+            <div style="background:var(--bg-subtle); padding:0.85rem; border-radius:8px; margin-bottom:1rem">
+              <h4 style="font-size:0.92rem; font-weight:700; margin-bottom:0.4rem">連續上班天數上限設定</h4>
+              <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap">
+                <div style="flex:1; min-width:200px">
+                  <label class="form-label">不可連續上班超過天數 (預設 5 天)</label>
+                  <input type="number" id="input-max-consecutive" min="1" max="14" class="form-input" style="width:120px" value="5" />
                 </div>
-                <div style="font-size:0.8rem; color:var(--text-muted); flex:2">
-                  💡 排班引擎將保證員工連上達到此天數後必須排入休息；若目前班表有超過此天數，違規檢視器會即時標示警示。
+                <div style="font-size:0.78rem; color:var(--text-muted); flex:2; min-width:220px">
+                  💡 排班引擎將保證員工連上達到此天數後必須排入休假；若目前排班有超過此天數，檢驗中心會即時標示警示。
                 </div>
               </div>
             </div>
 
-            <div style="background:var(--bg-subtle); padding:1rem; borderRadius:8px; margin-bottom:1.25rem">
-              <h4 style="font-size:0.95rem; font-weight:700; margin-bottom:0.5rem">自動排班參與與排除職稱設定</h4>
-              <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem">
-                勾選要「排除」在一般自動排班之外的職稱（預設排除「中控」，維持中控人員專屬班別）：
+            <!-- 專屬班別限制 (指定某員工只能排特定班別) -->
+            <div style="background:var(--bg-subtle); padding:0.85rem; border-radius:8px; margin-bottom:1rem">
+              <h4 style="font-size:0.92rem; font-weight:700; margin-bottom:0.4rem; color:var(--primary)">
+                🎯 指定某員工只能排特定班別 (專屬班別限制)
+              </h4>
+              <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:0.6rem">
+                指定特定員工僅能被排入指定的班別（例如某員工只能上 4F 哨與機-1）：
+              </p>
+              <form id="form-add-specific-shift" style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap; align-items:flex-end">
+                <div style="width:170px">
+                  <label class="form-label">選擇員工</label>
+                  <select id="specific-emp-select" class="form-select" required></select>
+                </div>
+                <div style="flex:1; min-width:220px">
+                  <label class="form-label">限定只允許之班別 (可複選)</label>
+                  <div id="specific-shifts-checkboxes" style="display:flex; gap:0.4rem; flex-wrap:wrap; max-height:90px; overflow-y:auto; background:white; padding:6px; border:1px solid var(--border-color); border-radius:6px"></div>
+                </div>
+                <button type="submit" class="btn btn-primary" style="padding:0.45rem 0.8rem">＋ 設定限定</button>
+              </form>
+              <div id="specific-shifts-list" style="display:flex; flex-direction:column; gap:0.4rem"></div>
+            </div>
+
+            <!-- 職稱排除 -->
+            <div style="background:var(--bg-subtle); padding:0.85rem; border-radius:8px; margin-bottom:1rem">
+              <h4 style="font-size:0.92rem; font-weight:700; margin-bottom:0.4rem">自動排班排除職稱設定</h4>
+              <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:0.6rem">
+                勾選要排除在自動排班外的職稱（預設排除「中控」，保護中控人員固定班別）：
               </p>
               <div id="excluded-titles-checkboxes" style="display:flex; gap:1rem; flex-wrap:wrap"></div>
             </div>
 
-            <div style="background:var(--bg-subtle); padding:1rem; borderRadius:8px">
-              <h4 style="font-size:0.95rem; font-weight:700; margin-bottom:0.5rem">人員互斥設定 (誰不能和誰在同一個班別)</h4>
-              <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem">設定特定兩位員工在同一天內不可被分派至同一班別：</p>
-              <form id="form-add-conflict" style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap">
-                <select id="conflict-emp1" class="form-select" style="width:180px" required></select>
-                <span style="align-self:center; font-weight:700; color:#e11d48">≠</span>
-                <select id="conflict-emp2" class="form-select" style="width:180px" required></select>
-                <input type="text" id="conflict-reason" class="form-input" placeholder="備註原因 (例: 性質衝突)" style="flex:1; min-width:150px" />
-                <button type="submit" class="btn btn-primary" style="padding:0.4rem 0.8rem">＋ 新增互斥</button>
+            <!-- 互斥同班 -->
+            <div style="background:var(--bg-subtle); padding:0.85rem; border-radius:8px">
+              <h4 style="font-size:0.92rem; font-weight:700; margin-bottom:0.4rem">人員互斥設定 (誰不能和誰在同一個班別)</h4>
+              <form id="form-add-conflict" style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap; align-items:center">
+                <select id="conflict-emp1" class="form-select" style="width:160px" required></select>
+                <span style="font-weight:700; color:#e11d48">≠</span>
+                <select id="conflict-emp2" class="form-select" style="width:160px" required></select>
+                <input type="text" id="conflict-reason" class="form-input" placeholder="原因備註" style="flex:1; min-width:130px" />
+                <button type="submit" class="btn btn-primary" style="padding:0.4rem 0.75rem">＋ 新增互斥</button>
               </form>
-              <div id="conflicts-list" style="display:flex; flex-direction:column; gap:0.5rem"></div>
+              <div id="conflicts-list" style="display:flex; flex-direction:column; gap:0.4rem"></div>
             </div>
           </div>
 
-          <!-- Tab 2: Grades -->
+          <!-- Tab 2: Grades (支援直接編輯) -->
           <div id="tab-pane-grades" style="display:none">
-            <div style="background:#e0e7ff; padding:0.85rem 1rem; border-radius:8px; margin-bottom:1.25rem; color:#3730a3; font-size:0.85rem">
-              <strong>🏆 等級位階邏輯說明：</strong><br />
-              - 階級權重（Rank）數值愈高，代表等級位階愈高。<br />
-              - 例如：S 級（最高級）人員可以上所有等級的班；而 A 級人員只能上 A 級與 A 級以下的班別；D 級僅能上基礎班別。<br />
-              - 您可以在下方自訂增加新等級（例如 SS 級、E 級）或調整排序名稱。
+            <div style="background:#e0e7ff; padding:0.75rem; border-radius:8px; margin-bottom:1rem; color:#3730a3; font-size:0.82rem">
+              <strong>🏆 等級位階規則：</strong>高位階（Rank 高）可上自身與所有較低位階的班別（例 S 級可上所有班；A 級可上 A 及以下）。表格欄位可<strong>直接在欄位內修改名稱與位階</strong>。
             </div>
-            <form id="form-add-grade" style="display:flex; gap:0.5rem; margin-bottom:1.25rem; align-items:flex-end">
-              <div style="width:100px">
-                <label class="form-label">等級代號</label>
+            <form id="form-add-grade" style="display:flex; gap:0.5rem; margin-bottom:1rem; align-items:flex-end; flex-wrap:wrap">
+              <div style="width:90px">
+                <label class="form-label">代號</label>
                 <input type="text" id="input-grade-id" class="form-input" placeholder="例: SS" maxlength="5" required />
               </div>
-              <div style="flex:1">
+              <div style="flex:1; min-width:140px">
                 <label class="form-label">等級名稱與說明</label>
                 <input type="text" id="input-grade-name" class="form-input" placeholder="例: SS 特級資深" />
               </div>
-              <div style="width:100px">
+              <div style="width:90px">
                 <label class="form-label">位階權重</label>
                 <input type="number" id="input-grade-rank" min="1" max="20" class="form-input" value="1" required />
               </div>
               <button type="submit" class="btn btn-primary">＋ 新增等級</button>
             </form>
-            <table style="width:100%; border-collapse:collapse; font-size:0.86rem">
-              <thead>
-                <tr style="background:var(--bg-subtle); text-align:left">
-                  <th style="padding:8px">位階排序</th>
-                  <th style="padding:8px">代號</th>
-                  <th style="padding:8px">名稱</th>
-                  <th style="padding:8px">權重等級 (Rank)</th>
-                  <th style="padding:8px">操作</th>
-                </tr>
-              </thead>
-              <tbody id="grades-table-body"></tbody>
-            </table>
+            <div style="overflow-x:auto">
+              <table style="width:100%; border-collapse:collapse; font-size:0.84rem">
+                <thead>
+                  <tr style="background:var(--bg-subtle); text-align:left">
+                    <th style="padding:6px">代號</th>
+                    <th style="padding:6px">名稱 (可直接編輯)</th>
+                    <th style="padding:6px">權重 Rank (可直接編輯)</th>
+                    <th style="padding:6px">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="grades-table-body"></tbody>
+              </table>
+            </div>
           </div>
 
-          <!-- Tab 3: Shifts -->
+          <!-- Tab 3: Shifts (支援直接編輯) -->
           <div id="tab-pane-shifts" style="display:none">
-            <form id="form-add-shift" style="background:var(--bg-subtle); padding:1rem; border-radius:8px; margin-bottom:1.25rem">
-              <h4 style="font-size:0.9rem; font-weight:700; margin-bottom:0.75rem">➕ 自訂新增班別 / 休假別</h4>
-              <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:0.75rem; margin-bottom:0.75rem">
+            <form id="form-add-shift" style="background:var(--bg-subtle); padding:0.85rem; border-radius:8px; margin-bottom:1rem">
+              <h4 style="font-size:0.9rem; font-weight:700; margin-bottom:0.6rem">➕ 新增班別 / 休假別</h4>
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.6rem; margin-bottom:0.6rem">
                 <div>
-                  <label class="form-label">班別名稱/代號</label>
-                  <input type="text" id="input-shift-name" class="form-input" placeholder="例: 機-5 / 特休" required />
+                  <label class="form-label">代號/名稱</label>
+                  <input type="text" id="input-shift-name" class="form-input" placeholder="例: 機-5" required />
                 </div>
                 <div>
                   <label class="form-label">類別</label>
                   <select id="input-shift-category" class="form-select">
                     <option value="work">一般工作班別</option>
-                    <option value="leave">休假別 (顏色色塊)</option>
+                    <option value="leave">休假別 (色塊)</option>
                   </select>
                 </div>
                 <div>
@@ -342,32 +376,31 @@
                   </select>
                 </div>
               </div>
-              <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap">
-                <div style="display:flex; align-items:center; gap:6px">
-                  <label class="form-label" style="margin:0">背景色塊:</label>
-                  <input type="color" id="input-shift-bg" value="#F1F5F9" style="cursor:pointer; border:none; width:32px; height:32px" />
+              <div style="display:flex; align-items:center; gap:0.8rem; flex-wrap:wrap">
+                <div style="display:flex; align-items:center; gap:4px">
+                  <label class="form-label" style="margin:0">背景色:</label>
+                  <input type="color" id="input-shift-bg" value="#F1F5F9" style="cursor:pointer; border:none; width:28px; height:28px" />
                 </div>
-                <div style="display:flex; align-items:center; gap:6px">
-                  <label class="form-label" style="margin:0">文字顏色:</label>
-                  <input type="color" id="input-shift-text" value="#1E293B" style="cursor:pointer; border:none; width:32px; height:32px" />
+                <div style="display:flex; align-items:center; gap:4px">
+                  <label class="form-label" style="margin:0">字體色:</label>
+                  <input type="color" id="input-shift-text" value="#1E293B" style="cursor:pointer; border:none; width:28px; height:28px" />
                 </div>
-                <div id="wrap-shift-demand" style="display:flex; align-items:center; gap:6px">
-                  <label class="form-label" style="margin:0">每日需求人數:</label>
-                  <input type="number" id="input-shift-demand" min="1" max="20" class="form-input" style="width:80px" value="1" />
+                <div id="wrap-shift-demand" style="display:flex; align-items:center; gap:4px">
+                  <label class="form-label" style="margin:0">每日需求:</label>
+                  <input type="number" id="input-shift-demand" min="1" max="20" class="form-input" style="width:70px" value="1" />
                 </div>
-                <div style="margin-left:auto">
-                  <button type="submit" class="btn btn-primary">＋ 新增此班別</button>
-                </div>
+                <button type="submit" class="btn btn-primary" style="margin-left:auto">＋ 新增班別</button>
               </div>
             </form>
-            <div style="max-height:320px; overflow-y:auto">
-              <table style="width:100%; border-collapse:collapse; font-size:0.84rem">
+            <div style="max-height:300px; overflow-y:auto">
+              <table style="width:100%; border-collapse:collapse; font-size:0.82rem">
                 <thead>
                   <tr style="background:var(--bg-subtle); text-align:left">
                     <th style="padding:6px">樣式預覽</th>
-                    <th style="padding:6px">代號</th>
+                    <th style="padding:6px">名稱 (可改)</th>
+                    <th style="padding:6px">背景 / 文字色</th>
                     <th style="padding:6px">類別</th>
-                    <th style="padding:6px">最低等級要求</th>
+                    <th style="padding:6px">最低等級</th>
                     <th style="padding:6px">性別要求</th>
                     <th style="padding:6px">每日需求</th>
                     <th style="padding:6px">操作</th>
@@ -378,40 +411,40 @@
             </div>
           </div>
 
-          <!-- Tab 4: Employees -->
+          <!-- Tab 4: Employees (下拉式職稱) -->
           <div id="tab-pane-employees" style="display:none">
-            <form id="form-add-employee" style="display:flex; gap:0.5rem; margin-bottom:1rem; align-items:flex-end; flex-wrap:wrap">
+            <form id="form-add-employee" style="display:flex; gap:0.5rem; margin-bottom:0.75rem; align-items:flex-end; flex-wrap:wrap">
               <div style="width:130px">
-                <label class="form-label">職稱</label>
-                <input type="text" id="input-emp-title" class="form-input" placeholder="例: 哨長" value="保全員" required />
+                <label class="form-label">職稱 (下拉選單)</label>
+                <select id="input-emp-title-select" class="form-select" required></select>
               </div>
-              <div style="width:140px">
+              <div style="width:130px">
                 <label class="form-label">姓名</label>
                 <input type="text" id="input-emp-name" class="form-input" placeholder="姓名" required />
               </div>
-              <div style="width:110px">
+              <div style="width:100px">
                 <label class="form-label">性別</label>
                 <select id="input-emp-gender" class="form-select">
                   <option value="M">男 (一般)</option>
                   <option value="F">女 (紅字)</option>
                 </select>
               </div>
-              <div style="width:110px">
+              <div style="width:100px">
                 <label class="form-label">等級</label>
                 <select id="input-emp-grade" class="form-select"></select>
               </div>
-              <button type="submit" class="btn btn-primary" style="padding:0.5rem 1rem">＋ 新增員工</button>
+              <button type="submit" class="btn btn-primary" style="padding:0.45rem 0.85rem">＋ 新增員工</button>
             </form>
-            <div style="margin-bottom:0.75rem">
+            <div style="margin-bottom:0.65rem">
               <input type="text" id="input-search-emp" class="form-input" placeholder="🔍 搜尋員工姓名、職稱或等級..." />
             </div>
-            <div style="max-height:340px; overflow-y:auto">
-              <table style="width:100%; border-collapse:collapse; font-size:0.84rem">
+            <div style="max-height:320px; overflow-y:auto">
+              <table style="width:100%; border-collapse:collapse; font-size:0.82rem">
                 <thead>
                   <tr style="background:var(--bg-subtle); text-align:left">
                     <th style="padding:6px">編號</th>
-                    <th style="padding:6px">職稱</th>
-                    <th style="padding:6px">姓名 (女性標紅)</th>
+                    <th style="padding:6px">職稱 (下拉選擇)</th>
+                    <th style="padding:6px">姓名 (女性紅字)</th>
                     <th style="padding:6px">性別</th>
                     <th style="padding:6px">等級</th>
                     <th style="padding:6px">操作</th>
@@ -421,6 +454,30 @@
               </table>
             </div>
           </div>
+
+          <!-- Tab 5: Job Titles (職稱選單自訂) -->
+          <div id="tab-pane-titles" style="display:none">
+            <div style="background:#f0fdf4; padding:0.75rem; border-radius:8px; margin-bottom:1rem; color:#166534; font-size:0.82rem">
+              👔 <strong>職稱選單管理：</strong>此處管理的職稱項目將自動同步為「員工管理」與「排班排除」的下拉選單選項，可隨意新增或刪除自訂職稱。
+            </div>
+            <form id="form-add-title" style="display:flex; gap:0.5rem; margin-bottom:1rem; align-items:flex-end">
+              <div style="width:200px">
+                <label class="form-label">新增自訂職稱</label>
+                <input type="text" id="input-custom-title" class="form-input" placeholder="例: 機動巡查員" required />
+              </div>
+              <button type="submit" class="btn btn-primary">＋ 新增此職稱</button>
+            </form>
+            <table style="width:100%; border-collapse:collapse; font-size:0.84rem">
+              <thead>
+                <tr style="background:var(--bg-subtle); text-align:left">
+                  <th style="padding:6px">職稱名稱</th>
+                  <th style="padding:6px">目前在職員工數</th>
+                  <th style="padding:6px">操作</th>
+                </tr>
+              </thead>
+              <tbody id="titles-table-body"></tbody>
+            </table>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-primary" onclick="closeModal('modal-settings')">完成並套用設定</button>
@@ -428,7 +485,7 @@
       </div>
     </div>
 
-    <!-- 彈窗 3：班表匯出中心 (Excel & 手機對稱圖片) -->
+    <!-- 彈窗 3：班表匯出中心 (支援日期時段選取) -->
     <div id="modal-export" class="modal-backdrop">
       <div class="modal-dialog" style="max-width:640px">
         <div class="modal-header">
@@ -439,54 +496,55 @@
           <button class="modal-close-btn" onclick="closeModal('modal-export')">&times;</button>
         </div>
         <div class="modal-body">
-          <div style="background:var(--bg-subtle); padding:1rem; border-radius:8px; margin-bottom:1.25rem">
-            <label class="form-label" style="font-size:0.9rem">選擇匯出期間 (Date Range)</label>
-            <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem">
-              <button type="button" id="btn-range-all" class="btn btn-primary" style="flex:1; font-size:0.82rem">當月全月份 (1~30日)</button>
-              <button type="button" id="btn-range-sample" class="btn btn-secondary" style="flex:1; font-size:0.82rem">原檔區間 (16~18日)</button>
-              <button type="button" id="btn-range-custom" class="btn btn-secondary" style="flex:1; font-size:0.82rem">自訂起訖日</button>
+          <div style="background:var(--bg-subtle); padding:0.85rem; border-radius:8px; margin-bottom:1rem">
+            <label class="form-label" style="font-size:0.88rem; font-weight:700">選擇匯出期間 (支援指定日期時段)</label>
+            <div style="display:flex; gap:0.4rem; margin-bottom:0.6rem">
+              <button type="button" id="btn-range-all" class="btn btn-primary" style="flex:1; font-size:0.8rem">當月全月份</button>
+              <button type="button" id="btn-range-sample" class="btn btn-secondary" style="flex:1; font-size:0.8rem">原檔區間 (16~18日)</button>
+              <button type="button" id="btn-range-custom" class="btn btn-secondary" style="flex:1; font-size:0.8rem">自訂起訖日</button>
             </div>
             <div id="wrap-range-custom" style="display:none; align-items:center; gap:0.5rem">
-              <span style="font-size:0.85rem">從</span>
-              <select id="export-start-date" class="form-select" style="width:90px"></select>
-              <span style="font-size:0.85rem">至</span>
-              <select id="export-end-date" class="form-select" style="width:90px"></select>
+              <span style="font-size:0.82rem">從</span>
+              <select id="export-start-date" class="form-select" style="width:85px"></select>
+              <span style="font-size:0.82rem">至</span>
+              <select id="export-end-date" class="form-select" style="width:85px"></select>
+              <span id="export-range-hint" style="font-size:0.78rem; color:var(--text-muted)"></span>
             </div>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem">
             <!-- Excel 匯出 -->
-            <div style="border:1px solid var(--border-color); border-radius:8px; padding:1rem; background:var(--bg-surface)">
-              <div style="display:flex; align-items:center; gap:8px; margin-bottom:0.5rem; color:#047857; font-weight:700">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
+            <div style="border:1px solid var(--border-color); border-radius:8px; padding:0.85rem; background:var(--bg-surface)">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:0.4rem; color:#047857; font-weight:700">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="8" y1="13" x2="16" y2="13"></line><line x1="8" y1="17" x2="16" y2="17"></line></svg>
                 匯出 EXCEL 檔 (.xlsx)
               </div>
-              <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:0.75rem; line-height:1.4">
-                精準符合規格：A3編號、B3職稱、C3姓名(<strong>女性為紅色字體</strong>)、D1號數、D2星期、A2:C2合併月份、每日出勤人數、休假天數統計及12小時工時計算。
+              <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.6rem; line-height:1.4">
+                精準符合規格：A3編號、B3職稱、C3姓名(<strong>女性為紅字</strong>)、<strong>日期純數字(1, 2, 3...)</strong>、<strong>星期純中文(一, 二, 三...)</strong>、末行出勤人數、休假統計與12H工時。
               </p>
-              <div style="margin-bottom:0.75rem">
-                <label class="form-label" style="font-size:0.78rem">Excel 版型樣式：</label>
-                <select id="export-excel-layout" class="form-select" style="font-size:0.8rem; padding:0.35rem 0.6rem">
+              <div style="margin-bottom:0.6rem">
+                <label class="form-label" style="font-size:0.76rem">版型樣式：</label>
+                <select id="export-excel-layout" class="form-select" style="font-size:0.78rem; padding:0.3rem 0.5rem">
                   <option value="standard">標準全寬度表格 (推薦)</option>
-                  <option value="split">對稱雙欄表格 (還原原檔版型)</option>
+                  <option value="split">對稱雙欄表格 (原檔雙半版型)</option>
                 </select>
               </div>
               <button id="btn-do-export-excel" class="btn btn-primary" style="width:100%; background:#059669; border-color:#047857">
-                立即下載 Excel 檔
+                立即下載 Excel
               </button>
             </div>
 
             <!-- 手機對稱圖片匯出 -->
-            <div style="border:1px solid var(--border-color); border-radius:8px; padding:1rem; background:var(--bg-surface)">
-              <div style="display:flex; align-items:center; gap:8px; margin-bottom:0.5rem; color:var(--primary); font-weight:700">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                匯出手機對稱圖片檔 (.png)
+            <div style="border:1px solid var(--border-color); border-radius:8px; padding:0.85rem; background:var(--bg-surface)">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:0.4rem; color:var(--primary); font-weight:700">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                匯出手機圖片檔 (.png)
               </div>
-              <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:0.75rem; line-height:1.4">
-                <strong>員工人數對稱分兩半合起來的高畫質圖片</strong>，使手機瀏覽時不需漫長垂直滾動，緊湊清晰，色塊色彩完整保留。
+              <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.6rem; line-height:1.4">
+                <strong>員工人數對稱分兩半並排</strong>，<strong>支援依上方選取的指定日期時段裁切匯出</strong>，避免手機檢視過長，色塊與文字高清呈現。
               </p>
-              <div style="background:#f0fdf4; padding:0.5rem; border-radius:6px; font-size:0.74rem; color:#166534; margin-bottom:0.75rem">
-                ✓ 2倍超高清渲染 · 支援手機通訊軟體傳閱
+              <div style="background:#f0fdf4; padding:0.4rem; border-radius:6px; font-size:0.72rem; color:#166534; margin-bottom:0.6rem">
+                ✓ 2倍超高清渲染 · 支援通訊軟體傳閱
               </div>
               <button id="btn-do-export-image" class="btn btn-primary" style="width:100%">
                 立即下載手機對稱圖片

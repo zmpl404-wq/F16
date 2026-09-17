@@ -1,8 +1,12 @@
 /**
  * F16 智慧自動化排班系統 - 核心邏輯 (app.js)
+ * 整合版本：支援手機版型直觀檢視、班別/假別/等級即時編輯、專屬班別限制、
+ * 職稱自訂下拉選單、Excel 色塊匯入、純數字/中文星期匯出、圖片指定時段匯出
  */
 
-// 1. 預設資料庫初始化
+// 1. 初始資料庫
+const DEFAULT_TITLES = ['組長', '哨長', '保全員', '中控'];
+
 const DEFAULT_GRADES = [
   { id: 'S', name: 'S 級 (最高階)', rank: 5, description: '可擔任所有等級班別，專責最高階班別' },
   { id: 'A', name: 'A 級 (次高階)', rank: 4, description: '可擔任 A、B、C、D 等級班別' },
@@ -113,10 +117,11 @@ const INITIAL_EMPLOYEES = [
   { id: 56, title: '中控', name: '陳佩雯', gender: 'F', grade: 'B', initialShifts: { '16': '中控', '17': '休', '18': '休' } }
 ];
 
-// 全域狀態
+// 全域狀態管理
 let state = {
   year: 2026,
   month: 9,
+  jobTitles: [...DEFAULT_TITLES],
   employees: JSON.parse(JSON.stringify(INITIAL_EMPLOYEES)),
   shifts: [...LEAVE_SHIFTS, ...WORK_SHIFTS],
   grades: JSON.parse(JSON.stringify(DEFAULT_GRADES)),
@@ -126,6 +131,8 @@ let state = {
     conflicts: [
       { id: 'c1', empId1: 2, empId2: 3, reason: '袁國峻 與 何峻岱 哨長不可在同一個班別' }
     ],
+    // 指定某員工只能排特定班別: [{ id, empId, allowedShiftIds: [] }]
+    specificShifts: [],
     workingHoursPerDay: 12
   },
   schedule: {},
@@ -133,10 +140,11 @@ let state = {
   viewMode: 'standard', // 'standard' | 'split'
   highlightCell: null,
   activeSettingsTab: 'rules',
-  activePicker: null
+  activePicker: null,
+  filterInspectorCategory: 'ALL'
 };
 
-// 初始化排班表資料
+// 初始化排班表
 function initSchedule() {
   state.schedule = {};
   state.employees.forEach(emp => {
@@ -149,15 +157,15 @@ function initSchedule() {
 }
 initSchedule();
 
-// 工具函式：計算當月天數與星期
 function getDaysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
 }
 
-const WEEKDAYS_ZH = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
-function getWeekdayName(year, month, day) {
+// 星期中文單字對照 (純中文一、二、三... 日期純數字 1、2、3...)
+const WEEKDAYS_CLEAN = ['日', '一', '二', '三', '四', '五', '六'];
+function getCleanWeekday(year, month, day) {
   const d = new Date(year, month - 1, parseInt(day, 10));
-  return WEEKDAYS_ZH[d.getDay()];
+  return WEEKDAYS_CLEAN[d.getDay()];
 }
 
 function getDatesArray() {
@@ -283,6 +291,29 @@ function validateSchedule() {
     });
   });
 
+  // 5. 指定員工專屬班別限制
+  (state.rulesConfig.specificShifts || []).forEach(rule => {
+    const emp = empMap.get(rule.empId);
+    if (!emp) return;
+    dates.forEach(d => {
+      const sId = state.schedule[emp.id]?.[d];
+      if (!sId) return;
+      const sObj = shiftMap.get(sId);
+      if (sObj && !sObj.isLeave && !rule.allowedShiftIds.includes(sId)) {
+        violations.push({
+          id: `specific-${emp.id}-${d}`,
+          type: 'SPECIFIC_SHIFT_MISMATCH',
+          category: '專屬班別限制',
+          empId: emp.id,
+          empName: emp.name,
+          empTitle: emp.title,
+          date: d,
+          message: `人員限定僅可上 [${rule.allowedShiftIds.join(', ')}]，目前排入「${sId}」`
+        });
+      }
+    });
+  });
+
   return violations;
 }
 
@@ -293,7 +324,13 @@ function runAutoSchedule() {
   const maxConsecutive = state.rulesConfig.maxConsecutiveDays || 5;
   const dates = getDatesArray();
 
-  // 複製並保留假別或鎖定儲存格
+  // 建立專屬班別限制對照表: empId -> Set of allowedShiftIds
+  const specificMap = new Map();
+  (state.rulesConfig.specificShifts || []).forEach(r => {
+    specificMap.set(r.empId, new Set(r.allowedShiftIds));
+  });
+
+  // 複製原表，嚴格保留手動鎖定及已排之假別
   const newSched = {};
   state.employees.forEach(emp => {
     newSched[emp.id] = {};
@@ -361,18 +398,27 @@ function runAutoSchedule() {
 
       let candidates = activeEmps.filter(emp => {
         if (todayAssigned.has(emp.id)) return false;
+
+        // 專屬班別限制：若該員工有限定班別，則只能排入限定名單內
+        const allowedSet = specificMap.get(emp.id);
+        if (allowedSet && !allowedSet.has(shift.id)) return false;
+
+        // 等級限制
         if ((gradeRankMap.get(emp.grade) || 1) < reqRank) return false;
+        // 性別限制
         if (shift.genderReq === 'M' && emp.gender !== 'M') return false;
         if (shift.genderReq === 'F' && emp.gender !== 'F') return false;
+        // 連續上班天數限制
         if (getConsecutive(emp.id, dIdx - 1) >= maxConsecutive) return false;
 
+        // 互斥限制
         const inShift = dayAssignments.get(shift.id) || [];
         const confs = conflictMap.get(emp.id);
         if (confs && inShift.some(id => confs.has(id))) return false;
         return true;
       });
 
-      // 排序候選人 (等級差距小且累積工時少者優先)
+      // 排序候選人
       candidates.sort((a, b) => {
         const diffA = (gradeRankMap.get(a.grade) || 1) - reqRank;
         const diffB = (gradeRankMap.get(b.grade) || 1) - reqRank;
@@ -422,7 +468,6 @@ function renderApp() {
   const shiftMap = new Map(state.shifts.map(s => [s.id, s]));
   const rocYear = state.year - 1911;
 
-  // 更新頂部標題與狀態
   document.getElementById('standard-title-text').innerText = 
     `📅 F16日班 ${rocYear}.${String(state.month).padStart(2, '0')}月份排班表 (全體人員完整檢視)`;
   document.getElementById('stat-emp-count').innerText = state.employees.length;
@@ -444,13 +489,8 @@ function renderApp() {
     btnInsp.className = 'btn btn-success';
   }
 
-  // A. 渲染標準全寬度表格
   renderStandardTable(dates, shiftMap, violationSet);
-
-  // B. 渲染對稱雙欄表格
   renderSplitTable(dates, shiftMap, violationSet, rocYear);
-
-  // C. 渲染檢驗中心清單
   renderInspectorModal(violations);
 }
 
@@ -461,16 +501,16 @@ function renderStandardTable(dates, shiftMap, violationSet) {
   html += '<th class="col-sticky-2" rowspan="2" style="z-index:35">職稱</th>';
   html += '<th class="col-sticky-3" rowspan="2" style="z-index:35">姓名</th>';
   dates.forEach(d => {
-    html += `<th style="background:#ede9fe; color:#4338ca">${d}號</th>`;
+    html += `<th style="background:#ede9fe; color:#4338ca">${d}</th>`;
   });
-  html += '<th class="col-stat" rowspan="2" style="background:#fee2e2; color:#991b1b; z-index:25">休假天數</th>';
-  html += '<th class="col-stat" rowspan="2" style="background:#e0e7ff; color:#3730a3; z-index:25">總工時(12H)</th>';
+  html += '<th class="col-stat" rowspan="2" style="background:#fee2e2; color:#991b1b; z-index:25">休假</th>';
+  html += '<th class="col-stat" rowspan="2" style="background:#e0e7ff; color:#3730a3; z-index:25">工時(12H)</th>';
   html += '</tr><tr>';
 
   dates.forEach(d => {
-    const w = getWeekdayName(state.year, state.month, d);
-    const isWk = w.includes('六') || w.includes('日');
-    html += `<th style="background:${isWk ? '#fef3c7' : '#f8fafc'}; color:${isWk ? '#b45309' : 'var(--text-muted)'}; font-size:0.75rem">${w.replace('星期', '週')}</th>`;
+    const w = getCleanWeekday(state.year, state.month, d);
+    const isWk = w === '六' || w === '日';
+    html += `<th style="background:${isWk ? '#fef3c7' : '#f8fafc'}; color:${isWk ? '#b45309' : 'var(--text-muted)'}; font-size:0.75rem">${w}</th>`;
   });
   html += '</tr></thead><tbody>';
 
@@ -488,7 +528,7 @@ function renderStandardTable(dates, shiftMap, violationSet) {
     html += `<tr>`;
     html += `<td class="col-sticky-1" style="font-weight:600; color:var(--text-muted)">${emp.id}</td>`;
     html += `<td class="col-sticky-2"><span style="font-size:0.76rem; font-weight:600">${emp.title}</span></td>`;
-    html += `<td class="col-sticky-3"><div style="display:flex; align-items:center; justify-content:center; gap:4px">`;
+    html += `<td class="col-sticky-3"><div style="display:flex; align-items:center; justify-content:center; gap:3px">`;
     html += `<span class="${emp.gender === 'F' ? 'female-name' : ''}">${emp.name}</span>`;
     if (emp.gender === 'F') html += `<span class="female-badge">女</span>`;
     html += `<span class="grade-badge grade-${emp.grade}">${emp.grade}</span>`;
@@ -516,7 +556,7 @@ function renderStandardTable(dates, shiftMap, violationSet) {
 
   // 出勤人數列
   html += '<tr class="row-attendance">';
-  html += '<td class="col-sticky-1" colspan="3" style="z-index:35">每日出勤人數</td>';
+  html += '<td class="col-sticky-1" colspan="3" style="z-index:35">出勤人數</td>';
   dates.forEach(d => {
     let count = 0;
     state.employees.forEach(emp => {
@@ -526,7 +566,7 @@ function renderStandardTable(dates, shiftMap, violationSet) {
     });
     html += `<td style="font-weight:800">${count}</td>`;
   });
-  html += '<td class="col-stat" colspan="2" style="font-size:0.78rem; color:var(--text-muted)">12H / 班</td>';
+  html += '<td class="col-stat" colspan="2" style="font-size:0.75rem; color:var(--text-muted)">12H/班</td>';
   html += '</tr></tbody>';
 
   table.innerHTML = html;
@@ -540,38 +580,34 @@ function renderSplitTable(dates, shiftMap, violationSet, rocYear) {
   const maxRows = Math.max(leftEmps.length, rightEmps.length);
 
   let html = '<thead>';
-  // Row 1
   html += `<tr style="background:#1e293b; color:white">`;
-  html += `<th colspan="${3 + dates.length}" style="font-size:1rem; padding:6px; color:white; background:#1e293b">F16日班</th>`;
-  html += `<th style="width:12px; background:#e2e8f0; border:none"></th>`;
-  html += `<th colspan="${3 + dates.length}" style="font-size:1rem; padding:6px; color:white; background:#1e293b">F16日班</th>`;
+  html += `<th colspan="${3 + dates.length}" style="font-size:0.95rem; padding:5px; color:white; background:#1e293b">F16日班</th>`;
+  html += `<th style="width:10px; background:#e2e8f0; border:none"></th>`;
+  html += `<th colspan="${3 + dates.length}" style="font-size:0.95rem; padding:5px; color:white; background:#1e293b">F16日班</th>`;
   html += `</tr>`;
 
-  // Row 2
   html += `<tr style="background:#f1f5f9">`;
   html += `<th colspan="3" style="font-weight:800; color:#334155">${rocYear}.${String(state.month).padStart(2, '0')}月份班表</th>`;
   dates.forEach(d => html += `<th style="background:#ede9fe; color:#4338ca; font-weight:800">${d}</th>`);
-  html += `<th style="width:12px; background:#e2e8f0; border:none"></th>`;
+  html += `<th style="width:10px; background:#e2e8f0; border:none"></th>`;
   html += `<th colspan="3" style="font-weight:800; color:#334155">${rocYear}.${String(state.month).padStart(2, '0')}月份班表</th>`;
   dates.forEach(d => html += `<th style="background:#ede9fe; color:#4338ca; font-weight:800">${d}</th>`);
   html += `</tr>`;
 
-  // Row 3
   html += `<tr style="background:#f8fafc; font-size:0.72rem">`;
-  html += `<th style="min-width:35px">號</th><th style="min-width:55px">職稱</th><th style="min-width:70px">姓名</th>`;
-  dates.forEach(d => html += `<th>${getWeekdayName(state.year, state.month, d).replace('星期', '週')}</th>`);
-  html += `<th style="width:12px; background:#e2e8f0; border:none"></th>`;
-  html += `<th style="min-width:35px">號</th><th style="min-width:55px">職稱</th><th style="min-width:70px">姓名</th>`;
-  dates.forEach(d => html += `<th>${getWeekdayName(state.year, state.month, d).replace('星期', '週')}</th>`);
+  html += `<th style="min-width:32px">號</th><th style="min-width:50px">職稱</th><th style="min-width:65px">姓名</th>`;
+  dates.forEach(d => html += `<th>${getCleanWeekday(state.year, state.month, d)}</th>`);
+  html += `<th style="width:10px; background:#e2e8f0; border:none"></th>`;
+  html += `<th style="min-width:32px">號</th><th style="min-width:50px">職稱</th><th style="min-width:65px">姓名</th>`;
+  dates.forEach(d => html += `<th>${getCleanWeekday(state.year, state.month, d)}</th>`);
   html += `</tr></thead><tbody>`;
 
   for (let r = 0; r < maxRows; r++) {
     const eL = leftEmps[r];
     const eR = rightEmps[r];
     html += '<tr>';
-    // Left
     if (eL) {
-      html += `<td style="font-weight:600; color:#64748b">${eL.id}</td><td style="font-size:0.75rem; font-weight:600">${eL.title}</td>`;
+      html += `<td style="font-weight:600; color:#64748b">${eL.id}</td><td style="font-size:0.74rem; font-weight:600">${eL.title}</td>`;
       html += `<td><span class="${eL.gender === 'F' ? 'female-name' : ''}" style="font-weight:600">${eL.name}</span></td>`;
       dates.forEach(d => {
         const sId = state.schedule[eL.id]?.[d] || '';
@@ -585,11 +621,10 @@ function renderSplitTable(dates, shiftMap, violationSet, rocYear) {
       html += `<td colspan="${3 + dates.length}"></td>`;
     }
 
-    html += `<td style="width:12px; background:#e2e8f0; border:none"></td>`;
+    html += `<td style="width:10px; background:#e2e8f0; border:none"></td>`;
 
-    // Right
     if (eR) {
-      html += `<td style="font-weight:600; color:#64748b">${eR.id}</td><td style="font-size:0.75rem; font-weight:600">${eR.title}</td>`;
+      html += `<td style="font-weight:600; color:#64748b">${eR.id}</td><td style="font-size:0.74rem; font-weight:600">${eR.title}</td>`;
       html += `<td><span class="${eR.gender === 'F' ? 'female-name' : ''}" style="font-weight:600">${eR.name}</span></td>`;
       dates.forEach(d => {
         const sId = state.schedule[eR.id]?.[d] || '';
@@ -617,7 +652,7 @@ function renderSplitTable(dates, shiftMap, violationSet, rocYear) {
     });
     html += `<td style="color:#4338ca; font-weight:800">${count}</td>`;
   });
-  html += '<td style="width:12px; background:#e2e8f0; border:none"></td>';
+  html += '<td style="width:10px; background:#e2e8f0; border:none"></td>';
   html += '<td colspan="3" style="color:#1e293b">出勤人數</td>';
   dates.forEach(d => {
     let count = 0;
@@ -633,7 +668,7 @@ function renderSplitTable(dates, shiftMap, violationSet, rocYear) {
   table.innerHTML = html;
 }
 
-// 5. 快速選班彈出層 (Quick Picker)
+// 5. 快速選班彈出層
 window.openQuickPicker = function(e, empId, dateStr) {
   e.stopPropagation();
   const emp = state.employees.find(x => x.id === empId);
@@ -651,14 +686,14 @@ window.openQuickPicker = function(e, empId, dateStr) {
   lockBtn.innerText = isLocked ? '🔓 解除鎖定 (排班可覆蓋)' : '🔒 鎖定此格 (排班不覆蓋)';
   lockBtn.className = `btn ${isLocked ? 'btn-danger' : 'btn-secondary'}`;
 
-  // 渲染假別 Chips
+  // 假別 Chips
   const leaveWrap = document.getElementById('picker-leave-chips');
   leaveWrap.innerHTML = state.shifts.filter(s => s.isLeave).map(s => `
     <div class="shift-chip" style="background-color:${s.bg}; color:${s.text}; font-weight:700; border:${currentShift === s.id ? '2px solid #0f172a' : '1px solid rgba(0,0,0,0.15)'}"
       onclick="selectShift('${s.id}')">${s.name}</div>
   `).join('');
 
-  // 渲染工作班 Chips
+  // 工作班 Chips
   const workWrap = document.getElementById('picker-work-chips');
   workWrap.innerHTML = state.shifts.filter(s => !s.isLeave).map(s => `
     <div class="shift-chip" style="background-color:${s.bg}; color:${s.text}; font-weight:600; border:${currentShift === s.id ? '2px solid var(--primary)' : '1px solid var(--border-color)'}"
@@ -667,8 +702,8 @@ window.openQuickPicker = function(e, empId, dateStr) {
 
   const popover = document.getElementById('quick-picker');
   const rect = e.currentTarget.getBoundingClientRect();
-  const left = Math.min(Math.max(10, rect.left), window.innerWidth - 340);
-  const top = Math.min(Math.max(10, rect.bottom + 6), window.innerHeight - 380);
+  const left = Math.min(Math.max(10, rect.left), window.innerWidth - 330);
+  const top = Math.min(Math.max(10, rect.bottom + 6), window.innerHeight - 390);
 
   popover.style.left = `${left}px`;
   popover.style.top = `${top}px`;
@@ -709,6 +744,7 @@ function renderInspectorModal(violations) {
   const gradeCount = violations.filter(v => v.type === 'GRADE_MISMATCH').length;
   const genderCount = violations.filter(v => v.type === 'GENDER_MISMATCH').length;
   const conflictCount = violations.filter(v => v.type === 'MUTUAL_CONFLICT').length;
+  const specificCount = violations.filter(v => v.type === 'SPECIFIC_SHIFT_MISMATCH').length;
 
   document.getElementById('stat-count-streak').innerText = streakCount;
   document.getElementById('stat-count-streak').style.color = streakCount > 0 ? '#e11d48' : '#059669';
@@ -718,27 +754,29 @@ function renderInspectorModal(violations) {
   document.getElementById('stat-count-gender').style.color = genderCount > 0 ? '#e11d48' : '#059669';
   document.getElementById('stat-count-conflict').innerText = conflictCount;
   document.getElementById('stat-count-conflict').style.color = conflictCount > 0 ? '#e11d48' : '#059669';
+  document.getElementById('stat-count-specific').innerText = specificCount;
+  document.getElementById('stat-count-specific').style.color = specificCount > 0 ? '#e11d48' : '#059669';
 
   const list = document.getElementById('inspector-violations-list');
   if (violations.length === 0) {
     list.innerHTML = `
-      <div style="text-align:center; padding:2.5rem 1rem; color:var(--text-muted)">
+      <div style="text-align:center; padding:2rem 1rem; color:var(--text-muted)">
         <div style="font-size:2rem; margin-bottom:0.5rem">🎉</div>
         <div style="font-size:1.05rem; font-weight:700; color:#047857">太棒了！沒有發現任何違規項目</div>
-        <p style="font-size:0.85rem; margin-top:0.25rem">所有人員均符合連續上班天數限制（≤ ${state.rulesConfig.maxConsecutiveDays || 5} 天）、等級位階資格與互斥條件。</p>
+        <p style="font-size:0.82rem; margin-top:0.25rem">所有人員均符合連續上班天數限制（≤ ${state.rulesConfig.maxConsecutiveDays || 5} 天）、等級位階、專屬班別與互斥條件。</p>
       </div>`;
   } else {
     list.innerHTML = violations.map(v => `
       <div class="violation-card" onclick="jumpToCell('${v.empId}_${v.date}')">
         <div class="violation-info">
-          <div style="display:flex; align-items:center; gap:0.5rem">
+          <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap">
             <span class="violation-emp">${v.empName} (${v.empTitle})</span>
-            <span style="font-size:0.75rem; padding:1px 6px; border-radius:4px; background:#fee2e2; color:#991b1b; font-weight:700">${v.category}</span>
-            <span style="font-size:0.78rem; color:var(--text-muted)">📅 日期: ${v.date} 號</span>
+            <span style="font-size:0.74rem; padding:1px 6px; border-radius:4px; background:#fee2e2; color:#991b1b; font-weight:700">${v.category}</span>
+            <span style="font-size:0.76rem; color:var(--text-muted)">📅 日期: ${v.date} 號</span>
           </div>
           <div class="violation-desc">${v.message}</div>
         </div>
-        <div style="display:flex; align-items:center; color:#e11d48; font-size:0.82rem; font-weight:700">前往定位 &rarr;</div>
+        <div style="display:flex; align-items:center; color:#e11d48; font-size:0.8rem; font-weight:700">定位 &rarr;</div>
       </div>
     `).join('');
   }
@@ -761,23 +799,36 @@ window.jumpToCell = function(cellKey) {
 // 7. 系統設定 (Settings)
 window.switchSettingsTab = function(tabName) {
   state.activeSettingsTab = tabName;
-  ['rules', 'grades', 'shifts', 'employees'].forEach(t => {
-    document.getElementById(`tab-pane-${t}`).style.display = t === tabName ? 'block' : 'none';
-    document.getElementById(`tab-btn-${t}`).className = `tab-btn ${t === tabName ? 'active' : ''}`;
+  ['rules', 'grades', 'shifts', 'employees', 'titles'].forEach(t => {
+    const pane = document.getElementById(`tab-pane-${t}`);
+    const btn = document.getElementById(`tab-btn-${t}`);
+    if (pane) pane.style.display = t === tabName ? 'block' : 'none';
+    if (btn) btn.className = `tab-btn ${t === tabName ? 'active' : ''}`;
   });
 };
 
 function renderSettingsTabs() {
   // A. Rules tab
   document.getElementById('input-max-consecutive').value = state.rulesConfig.maxConsecutiveDays || 5;
-  const allTitles = Array.from(new Set(state.employees.map(e => e.title)));
   const titleWrap = document.getElementById('excluded-titles-checkboxes');
-  titleWrap.innerHTML = allTitles.map(t => {
+  titleWrap.innerHTML = state.jobTitles.map(t => {
     const checked = state.rulesConfig.excludedTitles?.includes(t) ? 'checked' : '';
-    return `<label style="display:flex; align-items:center; gap:6px; font-size:0.86rem; cursor:pointer">
+    return `<label style="display:flex; align-items:center; gap:6px; font-size:0.84rem; cursor:pointer">
       <input type="checkbox" onchange="toggleExcludedTitle('${t}', this.checked)" ${checked} /> 排除 <strong>${t}</strong>
     </label>`;
   }).join('');
+
+  // 專屬班別限制員工選單與班別勾選區
+  const specEmpSel = document.getElementById('specific-emp-select');
+  specEmpSel.innerHTML = '<option value="">選擇員工...</option>' + state.employees.map(e => `<option value="${e.id}">${e.id}. ${e.name} (${e.title})</option>`).join('');
+  const specShiftsWrap = document.getElementById('specific-shifts-checkboxes');
+  specShiftsWrap.innerHTML = state.shifts.filter(s => !s.isLeave).map(s => `
+    <label style="display:inline-flex; align-items:center; gap:3px; font-size:0.78rem; background:#f1f5f9; padding:2px 6px; border-radius:4px; cursor:pointer">
+      <input type="checkbox" name="spec-shift-cb" value="${s.id}" /> ${s.name}
+    </label>
+  `).join('');
+
+  renderSpecificShiftsList();
 
   // 互斥下拉選單
   const sel1 = document.getElementById('conflict-emp1');
@@ -790,73 +841,184 @@ function renderSettingsTabs() {
   const confList = document.getElementById('conflicts-list');
   const empMap = new Map(state.employees.map(e => [e.id, e]));
   confList.innerHTML = (state.rulesConfig.conflicts || []).map(c => `
-    <div style="display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0.75rem; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color)">
-      <div style="font-size:0.85rem">
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:0.4rem 0.65rem; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color)">
+      <div style="font-size:0.82rem">
         <span style="font-weight:700; color:#e11d48">${empMap.get(c.empId1)?.name || c.empId1}</span>
-        <span style="margin:0 6px; color:var(--text-muted)">與</span>
+        <span style="margin:0 4px; color:var(--text-muted)">≠</span>
         <span style="font-weight:700; color:#e11d48">${empMap.get(c.empId2)?.name || c.empId2}</span>
-        <span style="margin-left:12px; font-size:0.78rem; color:var(--text-muted)">(${c.reason})</span>
+        <span style="margin-left:8px; font-size:0.75rem; color:var(--text-muted)">(${c.reason})</span>
       </div>
       <button type="button" onclick="deleteConflict('${c.id}')" style="background:none; border:none; color:#e11d48; cursor:pointer; font-size:16px">&times;</button>
     </div>
   `).join('');
 
-  // B. Grades tab
+  // B. Grades tab (支援直接在表格編輯)
   const gBody = document.getElementById('grades-table-body');
-  gBody.innerHTML = state.grades.map((g, idx) => `
+  gBody.innerHTML = state.grades.map(g => `
     <tr style="border-bottom:1px solid var(--border-color)">
-      <td style="padding:8px; font-weight:700">第 ${idx + 1} 階</td>
-      <td style="padding:8px"><span class="grade-badge grade-${g.id}">${g.id}</span></td>
-      <td style="padding:8px">${g.name}</td>
-      <td style="padding:8px; font-weight:700">${g.rank}</td>
-      <td style="padding:8px"><button type="button" onclick="deleteGrade('${g.id}')" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button></td>
+      <td style="padding:6px"><span class="grade-badge grade-${g.id}">${g.id}</span></td>
+      <td style="padding:6px">
+        <input type="text" class="form-input" style="padding:2px 6px; font-size:0.82rem; width:150px" value="${g.name}" onchange="updateGradeField('${g.id}', 'name', this.value)" />
+      </td>
+      <td style="padding:6px">
+        <input type="number" min="1" max="20" class="form-input" style="padding:2px 6px; font-size:0.82rem; width:70px" value="${g.rank}" onchange="updateGradeField('${g.id}', 'rank', parseInt(this.value,10)||1)" />
+      </td>
+      <td style="padding:6px">
+        <button type="button" onclick="deleteGrade('${g.id}')" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button>
+      </td>
     </tr>
   `).join('');
 
-  // C. Shifts tab
+  // C. Shifts tab (支援直接在表格編輯)
   const sGradeSel = document.getElementById('input-shift-mingrade');
   sGradeSel.innerHTML = state.grades.map(g => `<option value="${g.id}">${g.id} 級以上</option>`).join('');
   const sBody = document.getElementById('shifts-table-body');
   sBody.innerHTML = state.shifts.map(s => `
     <tr style="border-bottom:1px solid var(--border-color)">
-      <td style="padding:6px"><span style="padding:2px 8px; border-radius:4px; background-color:${s.bg}; color:${s.text}; font-weight:700">${s.name}</span></td>
-      <td style="padding:6px; font-weight:600">${s.id}</td>
-      <td style="padding:6px">${s.isLeave ? '<span style="color:#e11d48; font-weight:700">休假別</span>' : '工作班'}</td>
-      <td style="padding:6px"><span class="grade-badge grade-${s.minGrade}">${s.minGrade} 級以上</span></td>
-      <td style="padding:6px">${s.genderReq === 'M' ? '限男' : s.genderReq === 'F' ? '限女' : '不限'}</td>
-      <td style="padding:6px">${s.isLeave ? '-' : `${s.defaultDemand || 1} 人`}</td>
-      <td style="padding:6px"><button type="button" onclick="deleteShift('${s.id}')" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button></td>
+      <td style="padding:4px">
+        <span id="shift-badge-${s.id}" style="padding:2px 6px; border-radius:4px; background-color:${s.bg}; color:${s.text}; font-weight:700; font-size:0.8rem">
+          ${s.name}
+        </span>
+      </td>
+      <td style="padding:4px">
+        <input type="text" class="form-input" style="padding:2px 5px; font-size:0.8rem; width:85px" value="${s.name}" onchange="updateShiftField('${s.id}', 'name', this.value)" />
+      </td>
+      <td style="padding:4px; white-space:nowrap">
+        <input type="color" value="${s.bg}" style="border:none; width:22px; height:22px; cursor:pointer; vertical-align:middle" onchange="updateShiftField('${s.id}', 'bg', this.value)" title="修改背景色" />
+        <input type="color" value="${s.text}" style="border:none; width:22px; height:22px; cursor:pointer; vertical-align:middle; margin-left:3px" onchange="updateShiftField('${s.id}', 'text', this.value)" title="修改文字色" />
+      </td>
+      <td style="padding:4px">
+        <select class="form-select" style="padding:2px 4px; font-size:0.78rem; width:75px" onchange="updateShiftField('${s.id}', 'isLeave', this.value === 'true')">
+          <option value="false" ${!s.isLeave ? 'selected' : ''}>工作班</option>
+          <option value="true" ${s.isLeave ? 'selected' : ''}>休假別</option>
+        </select>
+      </td>
+      <td style="padding:4px">
+        <select class="form-select" style="padding:2px 4px; font-size:0.78rem; width:75px" onchange="updateShiftField('${s.id}', 'minGrade', this.value)">
+          ${state.grades.map(g => `<option value="${g.id}" ${s.minGrade === g.id ? 'selected' : ''}>${g.id} 級</option>`).join('')}
+        </select>
+      </td>
+      <td style="padding:4px">
+        <select class="form-select" style="padding:2px 4px; font-size:0.78rem; width:70px" onchange="updateShiftField('${s.id}', 'genderReq', this.value)">
+          <option value="ANY" ${s.genderReq === 'ANY' ? 'selected' : ''}>不限</option>
+          <option value="M" ${s.genderReq === 'M' ? 'selected' : ''}>限男</option>
+          <option value="F" ${s.genderReq === 'F' ? 'selected' : ''}>限女</option>
+        </select>
+      </td>
+      <td style="padding:4px">
+        <input type="number" min="1" max="20" class="form-input" style="padding:2px 4px; font-size:0.78rem; width:55px" value="${s.defaultDemand || 1}" ${s.isLeave ? 'disabled' : ''} onchange="updateShiftField('${s.id}', 'defaultDemand', parseInt(this.value,10)||1)" />
+      </td>
+      <td style="padding:4px">
+        <button type="button" onclick="deleteShift('${s.id}')" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button>
+      </td>
     </tr>
   `).join('');
 
-  // D. Employees tab
+  // D. Employees tab (職稱下拉式選單)
+  const empTitleSel = document.getElementById('input-emp-title-select');
+  empTitleSel.innerHTML = state.jobTitles.map(t => `<option value="${t}">${t}</option>`).join('');
   const eGradeSel = document.getElementById('input-emp-grade');
   eGradeSel.innerHTML = state.grades.map(g => `<option value="${g.id}">${g.id} 級</option>`).join('');
   renderEmployeeTable(state.employees);
+
+  // E. Titles tab
+  renderTitlesTable();
 }
+
+function renderSpecificShiftsList() {
+  const wrap = document.getElementById('specific-shifts-list');
+  const empMap = new Map(state.employees.map(e => [e.id, e]));
+  wrap.innerHTML = (state.rulesConfig.specificShifts || []).map(r => {
+    const emp = empMap.get(r.empId);
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:0.35rem 0.6rem; background:var(--bg-surface); border-radius:6px; border:1px solid var(--border-color)">
+        <div style="font-size:0.8rem">
+          <strong>${emp?.name || r.empId}</strong> (${emp?.title || ''}) 限定只上: 
+          <span style="color:var(--primary); font-weight:700">[ ${r.allowedShiftIds.join(', ')} ]</span>
+        </div>
+        <button type="button" onclick="deleteSpecificShift('${r.id}')" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button>
+      </div>`;
+  }).join('');
+}
+
+window.deleteSpecificShift = function(id) {
+  state.rulesConfig.specificShifts = state.rulesConfig.specificShifts.filter(r => r.id !== id);
+  renderSpecificShiftsList();
+  renderApp();
+};
 
 function renderEmployeeTable(list) {
   const eBody = document.getElementById('employees-table-body');
   eBody.innerHTML = list.map(emp => `
     <tr style="border-bottom:1px solid var(--border-color)">
-      <td style="padding:6px; font-weight:600; color:var(--text-muted)">${emp.id}</td>
-      <td style="padding:6px"><input type="text" value="${emp.title}" class="form-input" style="padding:2px 6px; font-size:0.82rem; width:90px" onchange="updateEmpField(${emp.id}, 'title', this.value)" /></td>
-      <td style="padding:6px"><input type="text" value="${emp.name}" class="form-input" style="padding:2px 6px; font-size:0.82rem; width:100px; color:${emp.gender === 'F' ? '#dc2626' : 'inherit'}; font-weight:${emp.gender === 'F' ? 700 : 400}" onchange="updateEmpField(${emp.id}, 'name', this.value)" /></td>
-      <td style="padding:6px">
-        <select class="form-select" style="padding:2px 6px; font-size:0.82rem; width:80px" onchange="updateEmpField(${emp.id}, 'gender', this.value)">
-          <option value="M" ${emp.gender === 'M' ? 'selected' : ''}>男</option>
-          <option value="F" ${emp.gender === 'F' ? 'selected' : ''}>女 (紅字)</option>
+      <td style="padding:4px; font-weight:600; color:var(--text-muted)">${emp.id}</td>
+      <td style="padding:4px">
+        <select class="form-select" style="padding:2px 4px; font-size:0.8rem; width:95px" onchange="updateEmpField(${emp.id}, 'title', this.value)">
+          ${state.jobTitles.map(t => `<option value="${t}" ${emp.title === t ? 'selected' : ''}>${t}</option>`).join('')}
         </select>
       </td>
-      <td style="padding:6px">
-        <select class="form-select" style="padding:2px 6px; font-size:0.82rem; width:80px" onchange="updateEmpField(${emp.id}, 'grade', this.value)">
+      <td style="padding:4px">
+        <input type="text" value="${emp.name}" class="form-input" style="padding:2px 4px; font-size:0.8rem; width:90px; color:${emp.gender === 'F' ? '#dc2626' : 'inherit'}; font-weight:${emp.gender === 'F' ? 700 : 400}" onchange="updateEmpField(${emp.id}, 'name', this.value)" />
+      </td>
+      <td style="padding:4px">
+        <select class="form-select" style="padding:2px 4px; font-size:0.8rem; width:75px" onchange="updateEmpField(${emp.id}, 'gender', this.value)">
+          <option value="M" ${emp.gender === 'M' ? 'selected' : ''}>男</option>
+          <option value="F" ${emp.gender === 'F' ? 'selected' : ''}>女 (紅)</option>
+        </select>
+      </td>
+      <td style="padding:4px">
+        <select class="form-select" style="padding:2px 4px; font-size:0.8rem; width:75px" onchange="updateEmpField(${emp.id}, 'grade', this.value)">
           ${state.grades.map(g => `<option value="${g.id}" ${emp.grade === g.id ? 'selected' : ''}>${g.id} 級</option>`).join('')}
         </select>
       </td>
-      <td style="padding:6px"><button type="button" onclick="deleteEmp(${emp.id})" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button></td>
+      <td style="padding:4px">
+        <button type="button" onclick="deleteEmp(${emp.id})" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button>
+      </td>
     </tr>
   `).join('');
 }
+
+function renderTitlesTable() {
+  const tBody = document.getElementById('titles-table-body');
+  tBody.innerHTML = state.jobTitles.map(t => {
+    const count = state.employees.filter(e => e.title === t).length;
+    return `
+      <tr style="border-bottom:1px solid var(--border-color)">
+        <td style="padding:6px; font-weight:700">${t}</td>
+        <td style="padding:6px">${count} 人</td>
+        <td style="padding:6px">
+          <button type="button" onclick="deleteJobTitle('${t}')" style="background:none; border:none; color:#e11d48; cursor:pointer">&times;</button>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+window.deleteJobTitle = function(title) {
+  const usedCount = state.employees.filter(e => e.title === title).length;
+  if (usedCount > 0) {
+    if (!confirm(`目前有 ${usedCount} 位員工使用「${title}」職稱，刪除後將會將其移為其他職稱。確認刪除？`)) return;
+  }
+  state.jobTitles = state.jobTitles.filter(t => t !== title);
+  renderSettingsTabs();
+  renderApp();
+};
+
+window.updateShiftField = function(shiftId, field, val) {
+  const s = state.shifts.find(x => x.id === shiftId);
+  if (s) {
+    s[field] = val;
+    renderApp();
+  }
+};
+
+window.updateGradeField = function(gradeId, field, val) {
+  const g = state.grades.find(x => x.id === gradeId);
+  if (g) {
+    g[field] = val;
+    state.grades.sort((a, b) => b.rank - a.rank);
+    renderApp();
+  }
+};
 
 window.toggleExcludedTitle = function(title, isExcluded) {
   if (isExcluded) {
@@ -900,7 +1062,147 @@ window.deleteEmp = function(empId) {
   }
 };
 
-// 8. 匯出功能 (Excel & 手機對稱圖片)
+// 8. Excel 色塊匯入功能 (Import Excel with Color & Text Mapping)
+async function handleImportExcel(file) {
+  if (!window.ExcelJS) {
+    alert('ExcelJS 載入中，請稍候重試。');
+    return;
+  }
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const wb = new window.ExcelJS.Workbook();
+    await wb.xlsx.load(arrayBuffer);
+    const ws = wb.worksheets[0];
+
+    // 色塊代號映射表 (ARGB hex -> 班別/假別 ID)
+    const colorToShiftMap = {
+      'FFC7CE': '休',
+      '262626': '停',
+      'FCE4D6': '粉',
+      'C6EFCE': '綠',
+      'BDD7EE': '藍'
+    };
+
+    const importedEmployees = [];
+    const importedSchedule = {};
+    const newTitles = new Set(state.jobTitles);
+
+    // 檢查是否為原檔對稱雙欄版型 (Row 2 有日期 16, 17, 18 或 1..30)
+    let leftDates = [];
+    for (let c = 4; c <= 6; c++) {
+      const v = ws.getRow(2).getCell(c).value;
+      if (v !== null && v !== undefined && v !== '') leftDates.push(String(v));
+    }
+    if (leftDates.length === 0) {
+      // 嘗試讀取單表 1..31
+      for (let c = 4; c <= ws.columnCount; c++) {
+        const v = ws.getRow(1).getCell(c).value || ws.getRow(2).getCell(c).value;
+        if (v) leftDates.push(String(v).replace('號', ''));
+      }
+    }
+
+    // 讀取左半部員工
+    for (let r = 3; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const id = row.getCell(1).value;
+      const title = row.getCell(2).value;
+      const nameCell = row.getCell(3);
+      const name = nameCell.value;
+
+      if (!name || name === '出勤人數') continue;
+
+      const titleStr = String(title || '保全員').trim();
+      newTitles.add(titleStr);
+
+      // 判斷性別 (字體紅字為女性)
+      const fontColor = nameCell.font?.color?.argb || '';
+      const isFemale = fontColor.includes('FF0000') || fontColor.includes('FF00') || ['燕', '宜', '萍', '容', '芬', '婷', '伶', '涵', '佳', '真', '晏', '樺', '璇', '嫺', '雯', '綾', '鈴', '羽', '瑩', '琳', '宣'].some(ch => String(name).includes(ch));
+
+      const empObj = {
+        id: typeof id === 'number' ? id : importedEmployees.length + 1,
+        title: titleStr,
+        name: String(name).trim(),
+        gender: isFemale ? 'F' : 'M',
+        grade: titleStr === '組長' ? 'S' : (titleStr === '哨長' ? 'A' : 'B'),
+        initialShifts: {}
+      };
+
+      importedSchedule[empObj.id] = {};
+      leftDates.forEach((d, i) => {
+        const cell = row.getCell(4 + i);
+        let sVal = String(cell.value || '').trim();
+        // 若文字空白或為特定色，檢查儲存格填滿色塊
+        const fillArgb = cell.fill?.fgColor?.argb || cell.fill?.bgColor?.argb || '';
+        const cleanHex = fillArgb.replace(/^FF/i, '').toUpperCase();
+        if (colorToShiftMap[cleanHex]) {
+          sVal = colorToShiftMap[cleanHex];
+        }
+        importedSchedule[empObj.id][d] = sVal;
+        empObj.initialShifts[d] = sVal;
+      });
+
+      importedEmployees.push(empObj);
+    }
+
+    // 讀取右半部員工 (Col 8~13) 若存在
+    if (ws.columnCount >= 10) {
+      for (let r = 3; r <= ws.rowCount; r++) {
+        const row = ws.getRow(r);
+        const id = row.getCell(8).value;
+        const title = row.getCell(9).value;
+        const nameCell = row.getCell(10);
+        const name = nameCell.value;
+
+        if (!name || name === '出勤人數') continue;
+
+        const titleStr = String(title || '保全員').trim();
+        newTitles.add(titleStr);
+        const fontColor = nameCell.font?.color?.argb || '';
+        const isFemale = fontColor.includes('FF0000') || fontColor.includes('FF00');
+
+        const empObj = {
+          id: typeof id === 'number' ? id : importedEmployees.length + 1,
+          title: titleStr,
+          name: String(name).trim(),
+          gender: isFemale ? 'F' : 'M',
+          grade: titleStr === '組長' ? 'S' : (titleStr === '哨長' ? 'A' : 'B'),
+          initialShifts: {}
+        };
+
+        importedSchedule[empObj.id] = {};
+        leftDates.forEach((d, i) => {
+          const cell = row.getCell(11 + i);
+          let sVal = String(cell.value || '').trim();
+          const fillArgb = cell.fill?.fgColor?.argb || cell.fill?.bgColor?.argb || '';
+          const cleanHex = fillArgb.replace(/^FF/i, '').toUpperCase();
+          if (colorToShiftMap[cleanHex]) {
+            sVal = colorToShiftMap[cleanHex];
+          }
+          importedSchedule[empObj.id][d] = sVal;
+          empObj.initialShifts[d] = sVal;
+        });
+
+        importedEmployees.push(empObj);
+      }
+    }
+
+    if (importedEmployees.length === 0) {
+      alert('未能在所選 Excel 檔案中解析到員工資料，請確認格式。');
+      return;
+    }
+
+    state.jobTitles = Array.from(newTitles);
+    state.employees = importedEmployees;
+    state.schedule = importedSchedule;
+    renderApp();
+    alert(`成功匯入 ${importedEmployees.length} 位員工與色塊排班資料！`);
+  } catch (err) {
+    console.error('Import error:', err);
+    alert('匯入失敗：' + err.message);
+  }
+}
+
+// 9. 匯出功能 (Excel 日期純數字/中文星期單字，圖片支援指定時段)
 let exportMode = 'ALL';
 function initExportOptions() {
   const dates = getDatesArray();
@@ -911,6 +1213,12 @@ function initExportOptions() {
   endSel.innerHTML = dates.map(d => `<option value="${d}">${d} 號</option>`).join('');
   startSel.value = '1';
   endSel.value = String(dates.length);
+  updateExportHint();
+}
+
+function updateExportHint() {
+  const dates = getExportDates();
+  document.getElementById('export-range-hint').innerText = `(共選取 ${dates.length} 天: ${dates[0]}~${dates[dates.length - 1]}日)`;
 }
 
 function getExportDates() {
@@ -924,12 +1232,9 @@ function getExportDates() {
   return dates;
 }
 
-// 匯出 Excel
+// 匯出 Excel (日期純數字 1, 2, 3...，星期純一, 二, 三...)
 async function doExportExcel() {
-  if (!window.ExcelJS) {
-    alert('ExcelJS 尚未完成載入，請確認網路連線正常。');
-    return;
-  }
+  if (!window.ExcelJS) return alert('ExcelJS 載入中，請稍候重試。');
   const dates = getExportDates();
   const rocYear = state.year - 1911;
   const layout = document.getElementById('export-excel-layout').value;
@@ -944,7 +1249,6 @@ async function doExportExcel() {
   };
 
   if (layout === 'standard') {
-    // A2:C2 合併
     worksheet.mergeCells('A2:C2');
     const titleCell = worksheet.getCell('A2');
     titleCell.value = `${rocYear}.${state.month}月班表`;
@@ -956,12 +1260,14 @@ async function doExportExcel() {
     worksheet.getCell('B3').value = '職稱';
     worksheet.getCell('C3').value = '姓名';
 
+    // D1, E1... 日期純數字 (1, 2, 3...)
+    // D2, E2... 星期純一、二、三...
     dates.forEach((dStr, idx) => {
       const col = 4 + idx;
       const dNum = parseInt(dStr, 10);
-      worksheet.getRow(1).getCell(col).value = `${dNum}號`;
-      worksheet.getRow(2).getCell(col).value = getWeekdayName(state.year, state.month, dNum);
-      worksheet.getRow(3).getCell(col).value = `${dNum}`;
+      worksheet.getRow(1).getCell(col).value = dNum; // 純數字
+      worksheet.getRow(2).getCell(col).value = getCleanWeekday(state.year, state.month, dNum); // 純 一、二、三...
+      worksheet.getRow(3).getCell(col).value = dNum;
     });
 
     const leaveCol = 4 + dates.length;
@@ -1028,9 +1334,11 @@ async function doExportExcel() {
     worksheet.mergeCells('H2:J2');
     worksheet.getCell('H2').value = `${rocYear}.${state.month}月份班表`;
 
+    // 日期純數字
     dates.forEach((d, i) => {
-      worksheet.getCell(2, 4 + i).value = d;
-      worksheet.getCell(2, 11 + i).value = d;
+      const dNum = parseInt(d, 10);
+      worksheet.getCell(2, 4 + i).value = dNum;
+      worksheet.getCell(2, 11 + i).value = dNum;
     });
 
     for (let i = 0; i < Math.max(leftEmps.length, rightEmps.length); i++) {
@@ -1092,37 +1400,42 @@ async function doExportExcel() {
   URL.revokeObjectURL(url);
 }
 
-// 匯出手機對稱圖片
+// 匯出手機對稱圖片 (支援指定日期時段裁切)
 async function doExportImage() {
-  if (!window.html2canvas) {
-    alert('html2canvas 載入中，請稍候重試。');
-    return;
-  }
-  const el = document.getElementById('split-view-capture-area');
-  // 若未顯示對稱雙欄，暫時切換以渲染
-  const wasHidden = document.getElementById('container-split-view').style.display === 'none';
-  if (wasHidden) document.getElementById('container-split-view').style.display = 'block';
+  if (!window.html2canvas) return alert('html2canvas 載入中，請稍候重試。');
+  const targetDates = getExportDates();
+  const rocYear = state.year - 1911;
+  const shiftMap = new Map(state.shifts.map(s => [s.id, s]));
+
+  // 暫時將對稱雙欄表格以選取之 targetDates 重新渲染
+  renderSplitTable(targetDates, shiftMap, new Set(), rocYear);
+  const container = document.getElementById('container-split-view');
+  const wasHidden = container.style.display === 'none';
+  if (wasHidden) container.style.display = 'block';
 
   try {
+    const el = document.getElementById('split-view-capture-area');
     const canvas = await window.html2canvas(el, { scale: 2, backgroundColor: '#ffffff' });
     const imgData = canvas.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = imgData;
-    a.download = `F16日班_${state.year - 1911}.${state.month}月份手機對稱班表.png`;
+    a.download = `F16日班_${rocYear}.${state.month}月份手機對稱班表_${targetDates[0]}-${targetDates[targetDates.length - 1]}日.png`;
     a.click();
   } catch (err) {
     console.error('Image export failed:', err);
     alert('圖片產生失敗，請重試。');
   } finally {
+    // 恢復全月渲染
+    renderSplitTable(getDatesArray(), shiftMap, new Set(), rocYear);
     if (wasHidden && state.viewMode === 'standard') {
-      document.getElementById('container-split-view').style.display = 'none';
+      container.style.display = 'none';
     }
   }
 }
 
-// 9. 事件綁定初始化
+// 10. 事件綁定初始化
 document.addEventListener('DOMContentLoaded', () => {
-  // 年月份切換
+  // 年月份變更
   document.getElementById('select-year').addEventListener('change', (e) => {
     state.year = parseInt(e.target.value, 10);
     renderApp();
@@ -1149,14 +1462,25 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('container-standard-view').style.display = 'none';
   });
 
-  // 頂部按鈕事件
+  // 頂部按鈕
   document.getElementById('btn-auto-schedule').addEventListener('click', runAutoSchedule);
   document.getElementById('btn-inspector').addEventListener('click', () => openModal('modal-inspector'));
   document.getElementById('btn-settings').addEventListener('click', () => openModal('modal-settings'));
   document.getElementById('btn-export').addEventListener('click', () => openModal('modal-export'));
 
+  // 匯入 Excel 觸發
+  const fileInput = document.getElementById('input-import-file');
+  document.getElementById('btn-import-excel').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleImportExcel(e.target.files[0]);
+      e.target.value = '';
+    }
+  });
+
+  // 清空排班
   document.getElementById('btn-clear-schedule').addEventListener('click', () => {
-    if (confirm('確定清空非鎖定的排班嗎？已預排的假別及已鎖定之班別將會保留。')) {
+    if (confirm('確定清空非鎖定的排班嗎？已預排的假別及已鎖定之班別將會妥善保留。')) {
       const dates = getDatesArray();
       const shiftMap = new Map(state.shifts.map(s => [s.id, s]));
       state.employees.forEach(emp => {
@@ -1198,6 +1522,31 @@ document.addEventListener('DOMContentLoaded', () => {
     renderApp();
   });
 
+  // 專屬班別限制表單
+  document.getElementById('form-add-specific-shift').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const empId = parseInt(document.getElementById('specific-emp-select').value, 10);
+    if (!empId) return alert('請選擇員工！');
+    const checked = Array.from(document.querySelectorAll('input[name="spec-shift-cb"]:checked')).map(cb => cb.value);
+    if (checked.length === 0) return alert('請至少勾選一個限定班別！');
+
+    // 檢查是否已有該員工限定
+    const exist = (state.rulesConfig.specificShifts || []).find(r => r.empId === empId);
+    if (exist) {
+      exist.allowedShiftIds = checked;
+    } else {
+      if (!state.rulesConfig.specificShifts) state.rulesConfig.specificShifts = [];
+      state.rulesConfig.specificShifts.push({
+        id: `spec_${Date.now()}`,
+        empId,
+        allowedShiftIds: checked
+      });
+    }
+    renderSpecificShiftsList();
+    renderApp();
+  });
+
+  // 互斥表單
   document.getElementById('form-add-conflict').addEventListener('submit', (e) => {
     e.preventDefault();
     const id1 = parseInt(document.getElementById('conflict-emp1').value, 10);
@@ -1207,13 +1556,14 @@ document.addEventListener('DOMContentLoaded', () => {
       id: `c_${Date.now()}`,
       empId1: id1,
       empId2: id2,
-      reason: document.getElementById('conflict-reason').value.trim() || '自訂不可在同一個班別'
+      reason: document.getElementById('conflict-reason').value.trim() || '自訂不可同班'
     });
     document.getElementById('conflict-reason').value = '';
     renderSettingsTabs();
     renderApp();
   });
 
+  // 等級表單
   document.getElementById('form-add-grade').addEventListener('submit', (e) => {
     e.preventDefault();
     const id = document.getElementById('input-grade-id').value.trim().toUpperCase();
@@ -1230,10 +1580,11 @@ document.addEventListener('DOMContentLoaded', () => {
     renderApp();
   });
 
+  // 班別表單
   document.getElementById('form-add-shift').addEventListener('submit', (e) => {
     e.preventDefault();
     const name = document.getElementById('input-shift-name').value.trim();
-    if (state.shifts.some(s => s.id === name)) return alert('已有相同代號之班別！');
+    if (state.shifts.some(s => s.id === name)) return alert('已有相同名稱班別！');
     const isLeave = document.getElementById('input-shift-category').value === 'leave';
     state.shifts.push({
       id: name,
@@ -1251,6 +1602,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderApp();
   });
 
+  // 員工表單 (下拉式職稱)
   document.getElementById('form-add-employee').addEventListener('submit', (e) => {
     e.preventDefault();
     const name = document.getElementById('input-emp-name').value.trim();
@@ -1258,7 +1610,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const maxId = state.employees.reduce((m, emp) => Math.max(m, emp.id), 0);
     state.employees.push({
       id: maxId + 1,
-      title: document.getElementById('input-emp-title').value.trim() || '保全員',
+      title: document.getElementById('input-emp-title-select').value,
       name: name,
       gender: document.getElementById('input-emp-gender').value,
       grade: document.getElementById('input-emp-grade').value,
@@ -1269,19 +1621,33 @@ document.addEventListener('DOMContentLoaded', () => {
     renderApp();
   });
 
+  // 職稱管理表單
+  document.getElementById('form-add-title').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const t = document.getElementById('input-custom-title').value.trim();
+    if (!t) return;
+    if (state.jobTitles.includes(t)) return alert('已存在此職稱！');
+    state.jobTitles.push(t);
+    document.getElementById('input-custom-title').value = '';
+    renderSettingsTabs();
+    renderApp();
+  });
+
+  // 搜尋員工
   document.getElementById('input-search-emp').addEventListener('input', (e) => {
     const q = e.target.value.toLowerCase();
     const filtered = state.employees.filter(emp => emp.name.toLowerCase().includes(q) || emp.title.toLowerCase().includes(q) || emp.grade.toLowerCase().includes(q));
     renderEmployeeTable(filtered);
   });
 
-  // 匯出按鈕事件
+  // 匯出按鈕區間
   document.getElementById('btn-range-all').addEventListener('click', () => {
     exportMode = 'ALL';
     document.getElementById('btn-range-all').className = 'btn btn-primary';
     document.getElementById('btn-range-sample').className = 'btn btn-secondary';
     document.getElementById('btn-range-custom').className = 'btn btn-secondary';
     document.getElementById('wrap-range-custom').style.display = 'none';
+    updateExportHint();
   });
   document.getElementById('btn-range-sample').addEventListener('click', () => {
     exportMode = 'SAMPLE';
@@ -1289,6 +1655,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-range-all').className = 'btn btn-secondary';
     document.getElementById('btn-range-custom').className = 'btn btn-secondary';
     document.getElementById('wrap-range-custom').style.display = 'none';
+    updateExportHint();
   });
   document.getElementById('btn-range-custom').addEventListener('click', () => {
     exportMode = 'CUSTOM';
@@ -1296,7 +1663,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-range-all').className = 'btn btn-secondary';
     document.getElementById('btn-range-sample').className = 'btn btn-secondary';
     document.getElementById('wrap-range-custom').style.display = 'flex';
+    updateExportHint();
   });
+  document.getElementById('export-start-date').addEventListener('change', updateExportHint);
+  document.getElementById('export-end-date').addEventListener('change', updateExportHint);
 
   document.getElementById('btn-do-export-excel').addEventListener('click', doExportExcel);
   document.getElementById('btn-do-export-image').addEventListener('click', doExportImage);
